@@ -29,6 +29,7 @@
 /wp-content/plugins/hostinger-reach/
 /wp-content/plugins/hostinger/
 /wp-content/plugins/litespeed-cache/
+/wp-content/plugins/wc-paymongo-payment-gateway/
 # Configuration
 wp-config.php
 
