@@ -39,6 +39,74 @@
         window.console.log.apply(window.console, args);
     }
 
+    function logError() {
+        if (!debug || !window.console || !window.console.error) {
+            return;
+        }
+
+        var args = Array.prototype.slice.call(arguments);
+        args.unshift('[WCPMBC]');
+        window.console.error.apply(window.console, args);
+    }
+
+    function installCheckoutFetchLogger() {
+        if (!window.fetch || window.__wcpmbcCheckoutFetchLoggerInstalled) {
+            return;
+        }
+
+        window.__wcpmbcCheckoutFetchLoggerInstalled = true;
+        var originalFetch = window.fetch.bind(window);
+
+        window.fetch = function (input, init) {
+            var url = typeof input === 'string' ? input : ((input && input.url) || '');
+            var isCheckoutRequest = url.indexOf('/wp-json/wc/store/v1/checkout') !== -1;
+
+            if (!isCheckoutRequest) {
+                return originalFetch(input, init);
+            }
+
+            log('Checkout request started', {
+                url: url,
+                method: (init && init.method) || 'GET'
+            });
+
+            return originalFetch(input, init).then(function (response) {
+                var cloned = response.clone();
+                cloned.text().then(function (text) {
+                    var payload = text;
+                    try {
+                        payload = JSON.parse(text);
+                    } catch (e) {
+                        // Keep raw text when response body is not JSON.
+                    }
+
+                    if (response.ok) {
+                        log('Checkout response', {
+                            status: response.status,
+                            body: payload
+                        });
+                    } else {
+                        logError('Checkout response error', {
+                            status: response.status,
+                            body: payload
+                        });
+                    }
+                }).catch(function (err) {
+                    logError('Unable to read checkout response body', err);
+                });
+
+                return response;
+            }).catch(function (err) {
+                logError('Checkout request failed before response', err);
+                throw err;
+            });
+        };
+
+        log('Installed checkout fetch logger.');
+    }
+
+    installCheckoutFetchLogger();
+
     function mapBillingData(rawBilling) {
         var billing = rawBilling || {};
 
@@ -134,6 +202,11 @@
             }
 
             var unsubscribe = eventRegistration.onPaymentSetup(function () {
+                log('onPaymentSetup (generic method)', {
+                    gatewayId: gatewayId,
+                    activePaymentMethod: activePaymentMethod
+                });
+
                 if (activePaymentMethod !== gatewayId) {
                     return {
                         type: successType,
@@ -188,6 +261,11 @@
             }
 
             var unsubscribe = eventRegistration.onPaymentSetup(function () {
+                log('onPaymentSetup (card)', {
+                    activePaymentMethod: activePaymentMethod,
+                    hasPublicKey: !!settings.publicKey
+                });
+
                 if (activePaymentMethod !== 'paymongo') {
                     return {
                         type: successType,
@@ -233,6 +311,8 @@
 
                 return createCardPaymentMethod(payload, settings.publicKey)
                     .then(function (response) {
+                        log('PayMongo payment method API response', response);
+
                         var paymentMethodId = response && response.data ? response.data.id : '';
                         if (!paymentMethodId) {
                             return {
@@ -253,6 +333,8 @@
                         };
                     })
                     .catch(function (errorBody) {
+                        logError('PayMongo payment method API error', errorBody);
+
                         return {
                             type: errorType,
                             message: normalizeErrorMessage(errorBody),

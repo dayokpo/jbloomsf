@@ -118,9 +118,14 @@ add_action('plugins_loaded', function () {
             return;
         }
 
-        $method = is_object($context) && isset($context->payment_method)
-            ? (string) $context->payment_method
-            : '';
+        $method = '';
+        if (is_object($context)) {
+            try {
+                $method = (string) $context->payment_method;
+            } catch (Throwable $e) {
+                $method = '';
+            }
+        }
 
         if (strpos($method, 'paymongo') !== 0) {
             return;
@@ -142,13 +147,52 @@ add_action('plugins_loaded', function () {
         wc_maybe_define_constant('WOOCOMMERCE_CHECKOUT', true);
 
         // phpcs:ignore WordPress.Security.NonceVerification
-        $_POST = is_object($context) && isset($context->payment_data) && is_array($context->payment_data)
-            ? $context->payment_data
-            : array();
+        $context_payment_data = null;
+        if (is_object($context)) {
+            try {
+                $context_payment_data = $context->payment_data;
+            } catch (Throwable $e) {
+                $context_payment_data = null;
+            }
+        }
+
+        $_POST = is_array($context_payment_data) ? $context_payment_data : array();
 
         $gateway_result = null;
 
         try {
+            if (function_exists('cynder_paymongo_create_intent')) {
+                $context_order_for_intent = null;
+                if (is_object($context)) {
+                    try {
+                        $context_order_for_intent = $context->order;
+                    } catch (Throwable $e) {
+                        $context_order_for_intent = null;
+                    }
+                }
+
+                $intent_order_id = is_object($context_order_for_intent)
+                    ? $context_order_for_intent->get_id()
+                    : 0;
+
+                if ($intent_order_id > 0) {
+                    try {
+                        // Regenerate intent for each attempt to avoid using stale IDs.
+                        cynder_paymongo_create_intent($intent_order_id);
+                        wcpmbc_log('Refreshed PayMongo payment intent before process_payment.', array(
+                            'payment_method' => $method,
+                            'order_id' => $intent_order_id,
+                        ));
+                    } catch (Throwable $e) {
+                        wcpmbc_log('Failed to refresh PayMongo payment intent before process_payment.', array(
+                            'payment_method' => $method,
+                            'order_id' => $intent_order_id,
+                            'error' => $e->getMessage(),
+                        ));
+                    }
+                }
+            }
+
             $payment_method_object->validate_fields();
 
             if (
@@ -158,9 +202,16 @@ add_action('plugins_loaded', function () {
                 Automattic\WooCommerce\StoreApi\Utilities\NoticeHandler::convert_notices_to_exceptions('woocommerce_rest_payment_error');
             }
 
-            $order_id = is_object($context) && isset($context->order) && is_object($context->order)
-                ? $context->order->get_id()
-                : 0;
+            $context_order = null;
+            if (is_object($context)) {
+                try {
+                    $context_order = $context->order;
+                } catch (Throwable $e) {
+                    $context_order = null;
+                }
+            }
+
+            $order_id = is_object($context_order) ? $context_order->get_id() : 0;
 
             $gateway_result = $payment_method_object->process_payment($order_id);
         } catch (Automattic\WooCommerce\StoreApi\Exceptions\RouteException $e) {
@@ -271,17 +322,33 @@ add_action('plugins_loaded', function () {
     );
 
     add_action('woocommerce_rest_checkout_process_payment_with_context', function ($context, &$payment_result) {
-        $method = is_object($context) && method_exists($context, 'payment_method')
-            ? $context->payment_method
-            : '';
+        $method = '';
+        $order_id = 0;
+        $payment_data = null;
 
-        $order_id = is_object($context) && isset($context->order) && is_object($context->order)
-            ? $context->order->get_id()
-            : 0;
+        if (is_object($context)) {
+            try {
+                $method = (string) $context->payment_method;
+            } catch (Throwable $e) {
+                $method = '';
+            }
 
-        $payment_data = is_object($context) && isset($context->payment_data) && is_array($context->payment_data)
-            ? $context->payment_data
-            : null;
+            try {
+                $order = $context->order;
+                if (is_object($order)) {
+                    $order_id = $order->get_id();
+                }
+            } catch (Throwable $e) {
+                $order_id = 0;
+            }
+
+            try {
+                $payment_data_candidate = $context->payment_data;
+                $payment_data = is_array($payment_data_candidate) ? $payment_data_candidate : null;
+            } catch (Throwable $e) {
+                $payment_data = null;
+            }
+        }
 
         wcpmbc_log(
             'Store API payment context (before gateway processing).',
