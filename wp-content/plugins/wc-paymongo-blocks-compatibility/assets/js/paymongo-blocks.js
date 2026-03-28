@@ -119,6 +119,47 @@
         );
     }
 
+    function GenericMethodContent(props) {
+        var gatewayId = props.gatewayId;
+        var description = props.description || '';
+        var activePaymentMethod = props.activePaymentMethod;
+        var eventRegistration = props.eventRegistration;
+        var emitResponse = props.emitResponse || {};
+
+        var successType = emitResponse.responseTypes ? emitResponse.responseTypes.SUCCESS : 'success';
+
+        useEffect(function () {
+            if (!eventRegistration || !eventRegistration.onPaymentSetup) {
+                return function () {};
+            }
+
+            var unsubscribe = eventRegistration.onPaymentSetup(function () {
+                if (activePaymentMethod !== gatewayId) {
+                    return {
+                        type: successType,
+                        meta: {
+                            paymentMethodData: {}
+                        }
+                    };
+                }
+
+                // Always return an object for legacy bridge compatibility.
+                return {
+                    type: successType,
+                    meta: {
+                        paymentMethodData: {}
+                    }
+                };
+            });
+
+            return unsubscribe;
+        }, [gatewayId, activePaymentMethod, eventRegistration, successType]);
+
+        return createElement(GenericContent, {
+            description: description
+        });
+    }
+
     function CardContent(props) {
         var settings = props.settings;
         var activePaymentMethod = props.activePaymentMethod;
@@ -302,7 +343,8 @@
         var labelText = decodeEntities(settings.title || gatewayId);
 
         var content = function () {
-            return createElement(GenericContent, {
+            return createElement(GenericMethodContent, {
+                gatewayId: gatewayId,
                 description: settings.description
             });
         };

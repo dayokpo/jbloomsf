@@ -60,6 +60,155 @@ add_action('before_woocommerce_init', function () {
 add_action('plugins_loaded', function () {
     wcpmbc_log('Bridge bootstrap started on plugins_loaded.');
 
+    $wcpmbc_clear_stale_notices = function () {
+        if (!function_exists('WC')) {
+            return;
+        }
+
+        $wc = WC();
+        if (!is_object($wc) || !isset($wc->session) || !$wc->session) {
+            return;
+        }
+
+        // Clear both in-memory and session-backed notices to avoid
+        // old payment API errors being rethrown as cart validation conflicts.
+        if (function_exists('wc_clear_notices')) {
+            wc_clear_notices();
+        }
+
+        $wc->session->set('wc_notices', null);
+    };
+
+    add_filter('rest_request_before_callbacks', function ($response, $handler, $request) {
+        if (!($request instanceof WP_REST_Request) || !function_exists('WC') || !function_exists('wc_clear_notices')) {
+            return $response;
+        }
+
+        if (strtoupper($request->get_method()) !== 'POST') {
+            return $response;
+        }
+
+        if ($request->get_route() !== '/wc/store/v1/checkout') {
+            return $response;
+        }
+
+        $wcpmbc_clear_stale_notices = $GLOBALS['wcpmbc_clear_stale_notices'] ?? null;
+        if (is_callable($wcpmbc_clear_stale_notices)) {
+            $wcpmbc_clear_stale_notices();
+            wcpmbc_log('Cleared stale Woo notices before Store API checkout callback.');
+        }
+
+        return $response;
+    }, 1, 3);
+
+    $GLOBALS['wcpmbc_clear_stale_notices'] = $wcpmbc_clear_stale_notices;
+
+    add_action('woocommerce_store_api_cart_errors', function () {
+        $wcpmbc_clear_stale_notices = $GLOBALS['wcpmbc_clear_stale_notices'] ?? null;
+        if (is_callable($wcpmbc_clear_stale_notices)) {
+            $wcpmbc_clear_stale_notices();
+            wcpmbc_log('Cleared stale Woo notices during Store API cart validation.');
+        }
+    }, 1, 2);
+
+    // PayMongo gateways are legacy gateways. Some error paths return null instead of
+    // an array, which causes Woo's legacy bridge to fatal when merging results.
+    add_action('woocommerce_rest_checkout_process_payment_with_context', function ($context, &$result) {
+        if (!is_object($result) || !empty($result->status)) {
+            return;
+        }
+
+        $method = is_object($context) && isset($context->payment_method)
+            ? (string) $context->payment_method
+            : '';
+
+        if (strpos($method, 'paymongo') !== 0) {
+            return;
+        }
+
+        $payment_method_object = is_object($context) && method_exists($context, 'get_payment_method_instance')
+            ? $context->get_payment_method_instance()
+            : null;
+
+        if (!($payment_method_object instanceof WC_Payment_Gateway)) {
+            $result->set_status('failure');
+            $result->set_payment_details(array('result' => 'failure', 'message' => 'PayMongo gateway is not available.'));
+            return;
+        }
+
+        // phpcs:ignore WordPress.Security.NonceVerification
+        $post_data = $_POST;
+
+        wc_maybe_define_constant('WOOCOMMERCE_CHECKOUT', true);
+
+        // phpcs:ignore WordPress.Security.NonceVerification
+        $_POST = is_object($context) && isset($context->payment_data) && is_array($context->payment_data)
+            ? $context->payment_data
+            : array();
+
+        $gateway_result = null;
+
+        try {
+            $payment_method_object->validate_fields();
+
+            if (
+                class_exists('Automattic\\WooCommerce\\StoreApi\\Utilities\\NoticeHandler') &&
+                function_exists('WC') && is_object(WC()) && isset(WC()->session) && WC()->session
+            ) {
+                Automattic\WooCommerce\StoreApi\Utilities\NoticeHandler::convert_notices_to_exceptions('woocommerce_rest_payment_error');
+            }
+
+            $order_id = is_object($context) && isset($context->order) && is_object($context->order)
+                ? $context->order->get_id()
+                : 0;
+
+            $gateway_result = $payment_method_object->process_payment($order_id);
+        } catch (Automattic\WooCommerce\StoreApi\Exceptions\RouteException $e) {
+            $gateway_result = array(
+                'result' => 'failure',
+                'message' => $e->getMessage(),
+            );
+        } catch (Throwable $e) {
+            wcpmbc_log('PayMongo payment pre-processor caught exception.', array(
+                'payment_method' => $method,
+                'error' => $e->getMessage(),
+            ));
+
+            $gateway_result = array(
+                'result' => 'failure',
+                'message' => 'Payment processing failed. Please try again.',
+            );
+        }
+
+        // phpcs:ignore WordPress.Security.NonceVerification
+        $_POST = $post_data;
+
+        if (!is_array($gateway_result)) {
+            wcpmbc_log('Normalized null/invalid gateway result from PayMongo process_payment.', array(
+                'payment_method' => $method,
+                'gateway_result_type' => gettype($gateway_result),
+            ));
+
+            $gateway_result = array(
+                'result' => 'failure',
+                'message' => 'Payment processing failed. Please try another payment method.',
+            );
+        }
+
+        $result_status = isset($gateway_result['result']) ? $gateway_result['result'] : 'failure';
+        $valid_status = array('success', 'failure', 'pending', 'error');
+
+        $result->set_status(in_array($result_status, $valid_status, true) ? $result_status : 'failure');
+
+        if (function_exists('wc_clear_notices')) {
+            wc_clear_notices();
+        }
+
+        $payment_details = is_array($result->payment_details) ? $result->payment_details : array();
+        $result->set_payment_details(array_merge($payment_details, $gateway_result));
+        $result->set_redirect_url(isset($gateway_result['redirect']) ? $gateway_result['redirect'] : '');
+    }, 998, 2);
+
     if (WCPMBC_DEBUG && is_admin()) {
         add_action('admin_footer', function () {
             echo '<script>console.log("[WCPMBC] Bridge plugin loaded in admin context.");</script>';
@@ -120,4 +269,48 @@ add_action('plugins_loaded', function () {
             wcpmbc_log('Registered PayMongo payment method integrations for blocks.', array('gateway_ids' => $gateway_ids));
         }
     );
+
+    add_action('woocommerce_rest_checkout_process_payment_with_context', function ($context, &$payment_result) {
+        $method = is_object($context) && method_exists($context, 'payment_method')
+            ? $context->payment_method
+            : '';
+
+        $order_id = is_object($context) && isset($context->order) && is_object($context->order)
+            ? $context->order->get_id()
+            : 0;
+
+        $payment_data = is_object($context) && isset($context->payment_data) && is_array($context->payment_data)
+            ? $context->payment_data
+            : null;
+
+        wcpmbc_log(
+            'Store API payment context (before gateway processing).',
+            array(
+                'payment_method' => $method,
+                'order_id' => $order_id,
+                'payment_data_type' => gettype($payment_data),
+                'payment_data_keys' => is_array($payment_data) ? array_keys($payment_data) : array(),
+            )
+        );
+    }, 5, 2);
+
+    add_action('woocommerce_rest_checkout_process_payment_with_context', function ($context, &$payment_result) {
+        $status = is_object($payment_result) && isset($payment_result->status)
+            ? $payment_result->status
+            : null;
+
+        $details = is_object($payment_result) && isset($payment_result->payment_details)
+            ? $payment_result->payment_details
+            : null;
+
+        wcpmbc_log(
+            'Store API payment context (after gateway processing).',
+            array(
+                'status' => $status,
+                'payment_details_type' => gettype($details),
+                'payment_details_is_array' => is_array($details),
+                'payment_details_keys' => is_array($details) ? array_keys($details) : array(),
+            )
+        );
+    }, 1005, 2);
 }, 100);
