@@ -34,17 +34,24 @@ class WC_PayMongo_QRPH_Gateway extends WC_Payment_Gateway
         $this->title = $this->get_option('title', 'QR Ph via PayMongo');
         $this->description = $this->get_option('description', 'Scan and pay using QR Ph supported banks and e-wallets.');
 
-        $test_mode = get_option('woocommerce_cynder_paymongo_test_mode');
-        $this->testmode = (!empty($test_mode) && $test_mode === 'yes');
-
-        $pk_key = $this->testmode ? 'woocommerce_cynder_paymongo_test_public_key' : 'woocommerce_cynder_paymongo_public_key';
-        $sk_key = $this->testmode ? 'woocommerce_cynder_paymongo_test_secret_key' : 'woocommerce_cynder_paymongo_secret_key';
-
-        $this->public_key = get_option($pk_key);
-        $this->secret_key = get_option($sk_key);
+        $key_config = self::get_keys_for_current_mode();
+        $this->testmode = ($key_config['mode'] === 'test');
+        $this->public_key = $key_config['public_key'];
+        $this->secret_key = $key_config['secret_key'];
 
         $debug_mode = get_option('woocommerce_cynder_paymongo_debug_mode');
         $this->debug_mode = (!empty($debug_mode) && $debug_mode === 'yes');
+
+        if ($this->debug_mode) {
+            wcpm_qrph_log(
+                'info',
+                'QRPH gateway initialized in ' . strtoupper($key_config['mode'])
+                . ' mode with public key ' . self::mask_key_for_log($this->public_key)
+                . ' (' . $key_config['public_key_environment'] . ') and secret key '
+                . self::mask_key_for_log($this->secret_key)
+                . ' (' . $key_config['secret_key_environment'] . ').'
+            );
+        }
 
         add_action('woocommerce_update_options_payment_gateways_' . $this->id, array($this, 'process_admin_options'));
         add_action('woocommerce_api_wcpm_qrph_return', array(__CLASS__, 'handle_return'));
@@ -76,9 +83,57 @@ class WC_PayMongo_QRPH_Gateway extends WC_Payment_Gateway
         );
     }
 
+    protected static function detect_key_environment($key)
+    {
+        $key = strtolower(trim((string) $key));
+
+        if ($key === '') {
+            return 'missing';
+        }
+
+        if (strpos($key, 'pk_live_') === 0 || strpos($key, 'sk_live_') === 0) {
+            return 'live';
+        }
+
+        if (strpos($key, 'pk_test_') === 0 || strpos($key, 'sk_test_') === 0) {
+            return 'test';
+        }
+
+        return 'unknown';
+    }
+
+    protected static function mask_key_for_log($key)
+    {
+        $key = (string) $key;
+
+        if ($key === '') {
+            return '(empty)';
+        }
+
+        return substr($key, 0, 12) . '...';
+    }
+
     protected function get_client()
     {
         if (empty($this->public_key) || empty($this->secret_key)) {
+            return null;
+        }
+
+        $expected_environment = $this->testmode ? 'test' : 'live';
+        $public_key_environment = self::detect_key_environment($this->public_key);
+        $secret_key_environment = self::detect_key_environment($this->secret_key);
+
+        if (
+            ($public_key_environment !== 'missing' && $public_key_environment !== 'unknown' && $public_key_environment !== $expected_environment)
+            || ($secret_key_environment !== 'missing' && $secret_key_environment !== 'unknown' && $secret_key_environment !== $expected_environment)
+        ) {
+            wcpm_qrph_log(
+                'error',
+                'QRPH key mismatch detected. Gateway expects ' . strtoupper($expected_environment)
+                . ' keys but public key looks ' . strtoupper($public_key_environment)
+                . ' and secret key looks ' . strtoupper($secret_key_environment) . '.'
+            );
+
             return null;
         }
 
@@ -135,6 +190,8 @@ class WC_PayMongo_QRPH_Gateway extends WC_Payment_Gateway
             $next_action['redirect']['url'] ?? null,
             $next_action['url'] ?? null,
             $next_action['redirect_url'] ?? null,
+            $next_action['code']['test_url'] ?? null,
+            $next_action['code']['url'] ?? null,
             $next_action['qrph']['checkout_url'] ?? null,
             $next_action['qrph']['url'] ?? null,
             $next_action['display_qr']['url'] ?? null,
@@ -154,6 +211,7 @@ class WC_PayMongo_QRPH_Gateway extends WC_Payment_Gateway
         $next_action = $intent['attributes']['next_action'] ?? array();
 
         $candidates = array(
+            $next_action['code']['image_url'] ?? null,
             $next_action['display_qr']['image_url'] ?? null,
             $next_action['display_qr']['qr_image_url'] ?? null,
             $next_action['display_qr']['url'] ?? null,
@@ -177,6 +235,8 @@ class WC_PayMongo_QRPH_Gateway extends WC_Payment_Gateway
         $next_action = $intent['attributes']['next_action'] ?? array();
 
         $candidates = array(
+            $next_action['code']['id'] ?? null,
+            $next_action['code']['label'] ?? null,
             $next_action['display_qr']['code'] ?? null,
             $next_action['display_qr']['qr_string'] ?? null,
             $next_action['qrph']['code'] ?? null,
@@ -213,9 +273,15 @@ class WC_PayMongo_QRPH_Gateway extends WC_Payment_Gateway
         $pk_key = $test_mode ? 'woocommerce_cynder_paymongo_test_public_key' : 'woocommerce_cynder_paymongo_public_key';
         $sk_key = $test_mode ? 'woocommerce_cynder_paymongo_test_secret_key' : 'woocommerce_cynder_paymongo_secret_key';
 
+        $public_key = (string) get_option($pk_key, '');
+        $secret_key = (string) get_option($sk_key, '');
+
         return array(
-            'public_key' => get_option($pk_key),
-            'secret_key' => get_option($sk_key),
+            'mode' => $test_mode ? 'test' : 'live',
+            'public_key' => $public_key,
+            'secret_key' => $secret_key,
+            'public_key_environment' => self::detect_key_environment($public_key),
+            'secret_key_environment' => self::detect_key_environment($secret_key),
         );
     }
 
@@ -269,9 +335,17 @@ class WC_PayMongo_QRPH_Gateway extends WC_Payment_Gateway
 
         $client = $this->get_client();
         if (!$client) {
-            $message = 'PayMongo API keys are not configured for the current environment.';
+            $message = 'PayMongo API keys are missing or do not match the selected environment. Please verify that Live mode uses pk_live/sk_live keys and Test mode uses pk_test/sk_test keys.';
             wc_add_notice($message, 'error');
             return array('result' => 'failure', 'message' => $message);
+        }
+
+        if ($this->debug_mode) {
+            wcpm_qrph_log(
+                'info',
+                'QRPH processing order ' . $order_id . ' using ' . strtoupper($this->testmode ? 'test' : 'live')
+                . ' mode with public key ' . self::mask_key_for_log($this->public_key) . '.'
+            );
         }
 
         try {
@@ -546,7 +620,6 @@ class WC_PayMongo_QRPH_Gateway extends WC_Payment_Gateway
             }
 
             $qr_image_url = self::extract_qr_image_url($intent);
-            $qr_reference = self::extract_qr_reference($intent);
 
             nocache_headers();
             status_header(200);
@@ -562,7 +635,6 @@ class WC_PayMongo_QRPH_Gateway extends WC_Payment_Gateway
                     .wrap { max-width: 520px; margin: 0 auto; text-align: center; }
                     .qr { margin: 16px 0; }
                     .qr img { max-width: 100%; height: auto; border: 1px solid #e5e7eb; border-radius: 8px; }
-                    .ref { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 10px; word-break: break-all; }
                     .actions a { display: inline-block; margin: 10px 6px 0; padding: 10px 14px; border-radius: 6px; text-decoration: none; }
                     .primary { background: #111827; color: #fff; }
                     .secondary { background: #f3f4f6; color: #111827; }
@@ -574,12 +646,11 @@ class WC_PayMongo_QRPH_Gateway extends WC_Payment_Gateway
                     <p><?php echo esc_html__('Use your banking or e-wallet app to scan the QR code and complete the payment.', 'wc-paymongo-qrph-addon'); ?></p>
                     <?php if (!empty($qr_image_url)) : ?>
                         <div class="qr">
-                            <img src="<?php echo esc_url($qr_image_url); ?>" alt="QR Ph" />
+                            <img src="<?php echo esc_url($qr_image_url, array('http', 'https', 'data')); ?>" alt="QR Ph" />
                         </div>
                     <?php endif; ?>
-                    <?php if (!empty($qr_reference)) : ?>
-                        <p><?php echo esc_html__('Reference', 'wc-paymongo-qrph-addon'); ?></p>
-                        <div class="ref"><?php echo esc_html($qr_reference); ?></div>
+                    <?php if (empty($qr_image_url)) : ?>
+                        <p><?php echo esc_html__('The QR image is temporarily unavailable, but your payment request is active. You can retry or check the order after completing payment.', 'wc-paymongo-qrph-addon'); ?></p>
                     <?php endif; ?>
                     <div class="actions">
                         <a class="primary" href="<?php echo esc_url(add_query_arg(array('wc-api' => 'wcpm_qrph_return', 'order' => $order_id, 'intent' => $intent_id), home_url('/'))); ?>"><?php echo esc_html__('I have completed payment', 'wc-paymongo-qrph-addon'); ?></a>
