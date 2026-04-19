@@ -10,8 +10,25 @@
  */
 
 
+function flower_shop_child_asset_version($relative_path) {
+	$file_path = get_stylesheet_directory() . $relative_path;
+
+	if (file_exists($file_path)) {
+		return (string) filemtime($file_path);
+	}
+
+	$theme = wp_get_theme();
+	return $theme->get('Version');
+}
+
 function flower_shop_child_enqueue_styles() {
-	wp_enqueue_style('flower-shop-child-style', get_stylesheet_uri(), array(), '1.0.0', 'screen, print');
+	wp_enqueue_style(
+		'flower-shop-child-style',
+		get_stylesheet_uri(),
+		array(),
+		flower_shop_child_asset_version('/style.css'),
+		'screen, print'
+	);
 }
 
 add_action('wp_enqueue_scripts', 'flower_shop_child_enqueue_styles', 11);
@@ -29,7 +46,7 @@ function flower_shop_child_enqueue_checkout_scripts() {
 		'flower-shop-child-checkout-province-city',
 		get_stylesheet_directory_uri() . '/assets/js/checkout-province-city.js',
 		array('jquery'),
-		'1.0.0',
+		flower_shop_child_asset_version('/assets/js/checkout-province-city.js'),
 		true
 	);
 
@@ -37,7 +54,7 @@ function flower_shop_child_enqueue_checkout_scripts() {
 		'flower-shop-child-checkout-province-city',
 		'flowerShopCheckoutData',
 		array(
-			'cityDataUrl' => get_stylesheet_directory_uri() . '/assets/data/ph-addresses.json',
+			'cityDataUrl' => add_query_arg('ver', flower_shop_child_asset_version('/assets/data/ph-addresses.json'), get_stylesheet_directory_uri() . '/assets/data/ph-addresses.json'),
 			'provinceOptions' => WC()->countries->get_states('PH'),
 			'i18n' => array(
 				'selectCity' => __('Select City / Municipality', 'flower-shop-child'),
