@@ -21,6 +21,21 @@ function flower_shop_child_asset_version($relative_path) {
 	return $theme->get('Version');
 }
 
+function flower_shop_child_allowed_ph_states() {
+	return array(
+		'BUL' => __('Bulacan', 'flower-shop-child'),
+		'00'  => __('Metro Manila', 'flower-shop-child'),
+	);
+}
+
+function flower_shop_child_limit_ph_states($states) {
+	if (isset($states['PH'])) {
+		$states['PH'] = flower_shop_child_allowed_ph_states();
+	}
+
+	return $states;
+}
+
 function flower_shop_child_enqueue_styles() {
 	wp_enqueue_style(
 		'flower-shop-child-style',
@@ -31,6 +46,7 @@ function flower_shop_child_enqueue_styles() {
 	);
 }
 
+add_filter('woocommerce_states', 'flower_shop_child_limit_ph_states');
 add_action('wp_enqueue_scripts', 'flower_shop_child_enqueue_styles', 11);
 
 function flower_shop_child_enqueue_checkout_scripts() {
@@ -70,7 +86,7 @@ function flower_shop_child_customize_checkout_location_fields($fields) {
 		return $fields;
 	}
 
-	$province_options = array('' => __('Select Province', 'flower-shop-child')) + WC()->countries->get_states('PH');
+	$province_options = array('' => __('Select Province', 'flower-shop-child')) + flower_shop_child_allowed_ph_states();
 	$city_options = array('' => __('Select City / Municipality', 'flower-shop-child'));
 
 	foreach (array('billing', 'shipping') as $group) {
@@ -105,5 +121,30 @@ function flower_shop_child_default_checkout_country($country) {
 	return empty($country) ? 'PH' : $country;
 }
 
+function flower_shop_child_default_checkout_state($state) {
+	$allowed_states = flower_shop_child_allowed_ph_states();
+
+	return isset($allowed_states[$state]) ? $state : '';
+}
+
+function flower_shop_child_validate_allowed_shipping_states() {
+	if (!function_exists('WC')) {
+		return;
+	}
+
+	$allowed_states = array_keys(flower_shop_child_allowed_ph_states());
+	$shipping_country = isset($_POST['shipping_country']) ? wc_clean(wp_unslash($_POST['shipping_country'])) : 'PH';
+	$shipping_state = isset($_POST['shipping_state']) ? wc_clean(wp_unslash($_POST['shipping_state'])) : '';
+	$billing_country = isset($_POST['billing_country']) ? wc_clean(wp_unslash($_POST['billing_country'])) : 'PH';
+	$billing_state = isset($_POST['billing_state']) ? wc_clean(wp_unslash($_POST['billing_state'])) : '';
+
+	if (('PH' === $shipping_country && $shipping_state && !in_array($shipping_state, $allowed_states, true)) || ('PH' === $billing_country && $billing_state && !in_array($billing_state, $allowed_states, true))) {
+		wc_add_notice(__('We currently ship only to Bulacan and Metro Manila.', 'flower-shop-child'), 'error');
+	}
+}
+
 add_filter('default_checkout_billing_country', 'flower_shop_child_default_checkout_country');
 add_filter('default_checkout_shipping_country', 'flower_shop_child_default_checkout_country');
+add_filter('default_checkout_billing_state', 'flower_shop_child_default_checkout_state');
+add_filter('default_checkout_shipping_state', 'flower_shop_child_default_checkout_state');
+add_action('woocommerce_after_checkout_validation', 'flower_shop_child_validate_allowed_shipping_states');
