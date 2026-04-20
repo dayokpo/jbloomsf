@@ -48,6 +48,10 @@ a.prad-absolute.prad-fron-edit-addon{
     display: none !important;
 }
 
+.wc-block-cart-items__header th td {
+    border: none !important;
+}
+
 
 
 @media only screen and (min-width: 1024px) {
