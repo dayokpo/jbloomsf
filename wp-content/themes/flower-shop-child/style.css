@@ -48,7 +48,8 @@ a.prad-absolute.prad-fron-edit-addon{
     display: none !important;
 }
 
-.wc-block-cart-items__header th td {
+.wc-block-cart-items .wc-block-cart-items__header th,
+.wc-block-cart-items .wc-block-cart-items__row td {
     border: none !important;
 }
 
