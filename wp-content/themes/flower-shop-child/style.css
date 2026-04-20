@@ -43,9 +43,12 @@ input[type="text"], input[type="email"], input[type="tel"] {
     margin-top: 12px !important;
 }
 
-.prad-block-content.prad-ellipsis-2 {
+.prad-block-content.prad-ellipsis-2, 
+a.prad-absolute.prad-fron-edit-addon{
     display: none !important;
 }
+
+
 
 @media only screen and (min-width: 1024px) {
     .single-product .cmsmasters_single_product {
