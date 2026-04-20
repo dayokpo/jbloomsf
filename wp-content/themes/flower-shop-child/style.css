@@ -50,7 +50,8 @@ a.prad-absolute.prad-fron-edit-addon{
 
 .wc-block-cart-items .wc-block-cart-items__header th,
 .wc-block-cart-items .wc-block-cart-items__row td {
-    border: none !important;
+    border-left: none !important;
+    border-right: none !important;
 }
 
 
