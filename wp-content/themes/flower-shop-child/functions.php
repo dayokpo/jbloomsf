@@ -81,6 +81,22 @@ function flower_shop_child_enqueue_checkout_scripts() {
 
 add_action('wp_enqueue_scripts', 'flower_shop_child_enqueue_checkout_scripts', 20);
 
+function flower_shop_child_enqueue_product_scripts() {
+	if (!function_exists('is_product') || !is_product()) {
+		return;
+	}
+
+	wp_enqueue_script(
+		'flower-shop-child-single-product-sticky',
+		get_stylesheet_directory_uri() . '/assets/js/single-product-sticky.js',
+		array(),
+		flower_shop_child_asset_version('/assets/js/single-product-sticky.js'),
+		true
+	);
+}
+
+add_action('wp_enqueue_scripts', 'flower_shop_child_enqueue_product_scripts', 20);
+
 function flower_shop_child_customize_checkout_location_fields($fields) {
 	if (!function_exists('WC') || !WC()->countries) {
 		return $fields;

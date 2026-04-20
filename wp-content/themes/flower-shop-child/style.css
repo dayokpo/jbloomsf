@@ -42,3 +42,57 @@ input[type="text"], input[type="email"], input[type="tel"] {
 .wc-block-components-address-form__country.wc-block-components-country-input {
     margin-top: 12px !important;
 }
+
+.prad-block-content.prad-ellipsis-2 {
+    display: none !important;
+}
+
+@media only screen and (min-width: 1024px) {
+    .single-product .cmsmasters_single_product {
+        display: flex;
+        align-items: stretch;
+        position: relative;
+        overflow: visible !important;
+    }
+
+    .single-product .cmsmasters_single_product .cmsmasters_product_left_column {
+        float: none;
+        position: relative;
+        width: 41.8%;
+        flex: 0 0 41.8%;
+        overflow: visible !important;
+    }
+
+    .single-product .cmsmasters_single_product .cmsmasters_product_right_column {
+        float: none;
+        width: 58.2%;
+        flex: 0 0 58.2%;
+        overflow: visible !important;
+    }
+
+    .single-product .cmsmasters_single_product .cmsmasters_product_images {
+        position: -webkit-sticky;
+        position: sticky;
+        top: 100px;
+        z-index: 20;
+    }
+}
+
+@media only screen and (max-width: 1023px) {
+    .single-product .cmsmasters_single_product {
+        display: block;
+    }
+
+    .single-product .cmsmasters_single_product .cmsmasters_product_left_column,
+    .single-product .cmsmasters_single_product .cmsmasters_product_right_column,
+    .single-product .cmsmasters_single_product .cmsmasters_product_images {
+        float: none;
+        position: static;
+        top: auto;
+        right: auto;
+        bottom: auto;
+        left: auto;
+        width: 100%;
+        min-height: 0;
+    }
+}
