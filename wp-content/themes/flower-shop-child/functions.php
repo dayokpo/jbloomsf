@@ -128,6 +128,15 @@ function flower_shop_child_customize_checkout_location_fields($fields) {
 		}
 	}
 
+	$fields['order']['special_message'] = array(
+		'type' => 'textarea',
+		'label' => __('Special Message', 'flower-shop-child'),
+		'placeholder' => __('Add a note or message for your order (optional)', 'flower-shop-child'),
+		'required' => false,
+		'class' => array('form-row-wide'),
+		'priority' => 110,
+	);
+
 	return $fields;
 }
 
@@ -164,3 +173,64 @@ add_filter('default_checkout_shipping_country', 'flower_shop_child_default_check
 add_filter('default_checkout_billing_state', 'flower_shop_child_default_checkout_state');
 add_filter('default_checkout_shipping_state', 'flower_shop_child_default_checkout_state');
 add_action('woocommerce_after_checkout_validation', 'flower_shop_child_validate_allowed_shipping_states');
+
+function flower_shop_child_save_special_message($order, $data) {
+	if (!empty($data['special_message'])) {
+		$order->update_meta_data('_special_message', sanitize_textarea_field($data['special_message']));
+	}
+}
+
+function flower_shop_child_get_special_message($order) {
+	$message = $order->get_meta('flower-shop-child/special-message');
+	if (empty($message)) {
+		$message = $order->get_meta('_special_message');
+	}
+	return $message;
+}
+
+function flower_shop_child_display_special_message_admin($order) {
+	$special_message = flower_shop_child_get_special_message($order);
+
+	if (!empty($special_message)) {
+		echo '<p><strong>' . esc_html__('Special Message:', 'flower-shop-child') . '</strong><br>' . nl2br(esc_html($special_message)) . '</p>';
+	}
+}
+
+function flower_shop_child_add_special_message_to_email($fields, $sent_to_admin, $order) {
+	$special_message = flower_shop_child_get_special_message($order);
+
+	if (!empty($special_message)) {
+		$fields['special_message'] = array(
+			'label' => __('Special Message', 'flower-shop-child'),
+			'value' => $special_message,
+		);
+	}
+
+	return $fields;
+}
+
+add_action('woocommerce_checkout_create_order', 'flower_shop_child_save_special_message', 10, 2);
+add_action('woocommerce_admin_order_data_after_billing_address', 'flower_shop_child_display_special_message_admin');
+add_filter('woocommerce_email_order_meta_fields', 'flower_shop_child_add_special_message_to_email', 10, 3);
+
+// Block-based checkout: register additional field (WooCommerce 8.6+)
+function flower_shop_child_register_block_checkout_fields() {
+	if (!function_exists('woocommerce_register_additional_checkout_field')) {
+		return;
+	}
+
+	woocommerce_register_additional_checkout_field(
+		array(
+			'id'         => 'flower-shop-child/special-message',
+			'label'      => __('Special Message', 'flower-shop-child'),
+			'location'   => 'order',
+			'type'       => 'text',
+			'required'   => false,
+			'attributes' => array(
+				'placeholder' => __('Add a note or message for your order (optional)', 'flower-shop-child'),
+			),
+		)
+	);
+}
+
+add_action('woocommerce_init', 'flower_shop_child_register_block_checkout_fields');
