@@ -24,7 +24,7 @@ function flower_shop_child_asset_version($relative_path) {
 function flower_shop_child_allowed_ph_states() {
 	return array(
 		'BUL' => __('Bulacan', 'flower-shop-child'),
-		'00'  => __('Metro Manila', 'flower-shop-child'),
+		// '00'  => __('Metro Manila', 'flower-shop-child'),
 	);
 }
 
