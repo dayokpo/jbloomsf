@@ -246,16 +246,95 @@ function flower_shop_child_woo_delivery_hpos_enabled() {
 	return \Automattic\WooCommerce\Utilities\OrderUtil::custom_orders_table_usage_is_enabled();
 }
 
-function flower_shop_child_woo_delivery_test_minutes() {
+function flower_shop_child_maybe_persist_delivery_test_time() {
+	$cookie_key = 'flower_shop_delivery_test_time';
+
 	if (!is_user_logged_in() || !current_user_can('manage_options')) {
-		return null;
+		return;
 	}
 
 	if (empty($_GET['delivery_test_time'])) {
-		return null;
+		return;
 	}
 
 	$raw_time = sanitize_text_field(wp_unslash($_GET['delivery_test_time']));
+
+	if ('off' === strtolower($raw_time)) {
+		if (!headers_sent()) {
+			setcookie($cookie_key, '', time() - HOUR_IN_SECONDS, '/');
+		}
+		unset($_COOKIE[$cookie_key]);
+
+		if (function_exists('WC') && WC() && WC()->session) {
+			WC()->session->set($cookie_key, '');
+		}
+
+		return;
+	}
+
+	if (!preg_match('/^([01]?\d|2[0-3]):([0-5]\d)$/', $raw_time)) {
+		return;
+	}
+
+	if (!headers_sent()) {
+		setcookie($cookie_key, $raw_time, time() + DAY_IN_SECONDS, '/');
+	}
+	$_COOKIE[$cookie_key] = $raw_time;
+
+	if (function_exists('WC') && WC() && WC()->session) {
+		WC()->session->set($cookie_key, $raw_time);
+	}
+}
+
+add_action('init', 'flower_shop_child_maybe_persist_delivery_test_time', 1);
+
+function flower_shop_child_woo_delivery_test_minutes() {
+	$cookie_key = 'flower_shop_delivery_test_time';
+
+	if (!empty($_REQUEST['delivery_test_time'])) {
+		if (!is_user_logged_in() || !current_user_can('manage_options')) {
+			return null;
+		}
+
+		$raw_time = sanitize_text_field(wp_unslash($_REQUEST['delivery_test_time']));
+		if (preg_match('/^([01]?\d|2[0-3]):([0-5]\d)$/', $raw_time, $matches)) {
+			return ((int) $matches[1] * 60) + (int) $matches[2];
+		}
+	}
+
+	// Admin-only switch from query parameter.
+	if (!empty($_GET['delivery_test_time'])) {
+		if (!is_user_logged_in() || !current_user_can('manage_options')) {
+			return null;
+		}
+
+		$raw_time = sanitize_text_field(wp_unslash($_GET['delivery_test_time']));
+
+		if ('off' === strtolower($raw_time)) {
+			return null;
+		}
+
+		if (preg_match('/^([01]?\d|2[0-3]):([0-5]\d)$/', $raw_time, $matches)) {
+			return ((int) $matches[1] * 60) + (int) $matches[2];
+		}
+
+		return null;
+	}
+
+	// Read persisted override from session/cookie for all request paths
+	// so frontend/AJAX use the same simulated time.
+	if (function_exists('WC') && WC() && WC()->session) {
+		$session_time = WC()->session->get($cookie_key);
+		if (!empty($session_time) && preg_match('/^([01]?\d|2[0-3]):([0-5]\d)$/', $session_time, $matches)) {
+			return ((int) $matches[1] * 60) + (int) $matches[2];
+		}
+	}
+
+	if (empty($_COOKIE[$cookie_key])) {
+		return null;
+	}
+
+	$raw_time = sanitize_text_field(wp_unslash($_COOKIE[$cookie_key]));
 
 	if (!preg_match('/^([01]?\d|2[0-3]):([0-5]\d)$/', $raw_time, $matches)) {
 		return null;
@@ -271,9 +350,37 @@ function flower_shop_child_woo_delivery_current_minutes() {
 		return $test_minutes;
 	}
 
-	$current_timestamp = current_time('timestamp');
+	$current_timestamp = current_time('timestamp', true);
 
 	return ((int) wp_date('G', $current_timestamp) * 60) + (int) wp_date('i', $current_timestamp);
+}
+
+function flower_shop_child_woo_delivery_test_time_display() {
+	$cookie_key = 'flower_shop_delivery_test_time';
+
+	if (!is_user_logged_in() || !current_user_can('manage_options')) {
+		return 'off';
+	}
+
+	if (!empty($_GET['delivery_test_time'])) {
+		$raw_time = sanitize_text_field(wp_unslash($_GET['delivery_test_time']));
+		if ('off' === strtolower($raw_time)) {
+			return 'off';
+		}
+
+		if (preg_match('/^([01]?\d|2[0-3]):([0-5]\d)$/', $raw_time)) {
+			return $raw_time;
+		}
+	}
+
+	if (!empty($_COOKIE[$cookie_key])) {
+		$raw_time = sanitize_text_field(wp_unslash($_COOKIE[$cookie_key]));
+		if (preg_match('/^([01]?\d|2[0-3]):([0-5]\d)$/', $raw_time)) {
+			return $raw_time;
+		}
+	}
+
+	return 'off';
 }
 
 function flower_shop_child_woo_delivery_slot_duration($delivery_time_settings = null) {
@@ -565,19 +672,57 @@ function flower_shop_child_enforce_delivery_slots_frontend() {
 		return;
 	}
 
-	$current_timestamp = current_time('timestamp');
+	$current_timestamp = current_time('timestamp', true);
 	$server_current_minutes = flower_shop_child_woo_delivery_current_minutes();
 	$server_today_date = wp_date('Y-m-d', $current_timestamp);
 	$test_minutes = flower_shop_child_woo_delivery_test_minutes();
+	$debug_wp_datetime = wp_date('Y-m-d H:i:s', $current_timestamp);
+	$debug_test_time = flower_shop_child_woo_delivery_test_time_display();
+
+	if (is_user_logged_in() && current_user_can('manage_options')) {
+		echo '<div id="flower-shop-delivery-debug" style="position:fixed;top:0;left:0;right:0;z-index:999999;background:#111;color:#fff;padding:8px 12px;font:12px/1.4 monospace;">';
+		echo '<strong>Delivery Debug</strong> | WP datetime: ' . esc_html($debug_wp_datetime) . ' | delivery_test_time: ' . esc_html($debug_test_time);
+		echo '</div>';
+	}
 	?>
 	<script>
 		(function($) {
 			var serverCurrentMinutes = <?php echo (int) $server_current_minutes; ?>;
 			var serverTodayDate = '<?php echo esc_js($server_today_date); ?>';
 			var forcedTestMinutes = <?php echo null === $test_minutes ? 'null' : (int) $test_minutes; ?>;
+			var debugWpDatetime = '<?php echo esc_js($debug_wp_datetime); ?>';
+			var debugDeliveryTestTime = '<?php echo esc_js($debug_test_time); ?>';
 			var enforceTimer = null;
 			var isProgrammaticUpdate = false;
 			var observerDebounce = null;
+
+			if (window.console && typeof window.console.log === 'function') {
+				console.log('[Delivery Debug] WP datetime:', debugWpDatetime, '| delivery_test_time:', debugDeliveryTestTime, '| forcedTestMinutes:', forcedTestMinutes);
+			}
+
+			if (debugDeliveryTestTime && debugDeliveryTestTime !== 'off') {
+				document.cookie = 'flower_shop_delivery_test_time=' + encodeURIComponent(debugDeliveryTestTime) + '; path=/';
+
+				$(document).ajaxSend(function(event, jqXHR, ajaxOptions) {
+					if (!ajaxOptions || !ajaxOptions.url || ajaxOptions.url.indexOf('admin-ajax.php') === -1) {
+						return;
+					}
+
+					var data = ajaxOptions.data;
+					if (typeof data === 'string') {
+						if (data.indexOf('action=coderockz_woo_delivery_') !== -1 && data.indexOf('delivery_test_time=') === -1) {
+							ajaxOptions.data += '&delivery_test_time=' + encodeURIComponent(debugDeliveryTestTime);
+						}
+						return;
+					}
+
+					if (data && typeof data === 'object' && typeof data.action === 'string' && data.action.indexOf('coderockz_woo_delivery_') === 0) {
+						if (typeof data.delivery_test_time === 'undefined') {
+							data.delivery_test_time = debugDeliveryTestTime;
+						}
+					}
+				});
+			}
 
 			function getBrowserCurrentMinutes() {
 				if (forcedTestMinutes !== null) {
@@ -603,6 +748,14 @@ function flower_shop_child_enforce_delivery_slots_frontend() {
 				var month = ('0' + (now.getMonth() + 1)).slice(-2);
 				var day = ('0' + now.getDate()).slice(-2);
 				return year + '-' + month + '-' + day;
+			}
+
+			function isAfterTodayYmd(candidateYmd, todayYmd) {
+				if (!candidateYmd || !todayYmd) {
+					return false;
+				}
+
+				return candidateYmd > todayYmd;
 			}
 
 			function setNativeInputValue(el, value) {
@@ -694,6 +847,12 @@ function flower_shop_child_enforce_delivery_slots_frontend() {
 				return parseMinutes(range[0]);
 			}
 
+			function isMaxLimitDisabledOption($option) {
+				var text = ($.trim($option.text() || '')).toLowerCase();
+
+				return text.indexOf('maximum') !== -1 || text.indexOf('limit exceed') !== -1 || text.indexOf('limit exceeded') !== -1;
+			}
+
 			function mustDisableTodaySlot(startMinutes, currentMinutes) {
 				if (currentMinutes < 480) {
 					return startMinutes < 660;
@@ -774,6 +933,66 @@ function flower_shop_child_enforce_delivery_slots_frontend() {
 						}
 						return;
 					}
+				} else if (todayDate && currentMinutes < 720) {
+					if (fp) {
+						var preNoonEnableConfig = Array.isArray(fp.config.enable) ? fp.config.enable.slice() : [];
+						var preNoonDisableConfig = Array.isArray(fp.config.disable) ? fp.config.disable.slice() : [];
+
+						if (preNoonEnableConfig.length) {
+							var hasTodayEnabled = preNoonEnableConfig.some(function(item) {
+								if (item instanceof Date) {
+									return fp.formatDate(item, 'Y-m-d') === todayDate;
+								}
+								return typeof item === 'string' && $.trim(item) === todayDate;
+							});
+
+							if (!hasTodayEnabled) {
+								preNoonEnableConfig.unshift(todayDate);
+							}
+
+							fp.set('enable', preNoonEnableConfig);
+						}
+
+						if (preNoonDisableConfig.length) {
+							preNoonDisableConfig = preNoonDisableConfig.filter(function(item) {
+								if (item instanceof Date) {
+									return fp.formatDate(item, 'Y-m-d') !== todayDate;
+								}
+								if (typeof item !== 'string') {
+									return true;
+								}
+								return $.trim(item) !== todayDate;
+							});
+
+							fp.set('disable', preNoonDisableConfig);
+						}
+					}
+
+					if (!selectedDate || isAfterTodayYmd(selectedDate, todayDate)) {
+						isProgrammaticUpdate = true;
+
+						if (fp) {
+							fp.setDate(todayDate, true, 'Y-m-d');
+						} else {
+							if ($hiddenDateInput.length) {
+								setNativeInputValue($hiddenDateInput.get(0), todayDate);
+							}
+
+							if ($dateInput.length) {
+								setNativeInputValue($dateInput.get(0), todayDate);
+							}
+						}
+
+						if ($timeSelect.length) {
+							$timeSelect.val('');
+						}
+
+						setTimeout(function() {
+							isProgrammaticUpdate = false;
+						}, 300);
+
+						return;
+					}
 				}
 
 				if (!$timeSelect.length || !todayDate || selectedDate !== todayDate) {
@@ -787,6 +1006,10 @@ function flower_shop_child_enforce_delivery_slots_frontend() {
 
 					if (!optionValue) {
 						return;
+					}
+
+					if (!isMaxLimitDisabledOption($option)) {
+						$option.prop('disabled', false);
 					}
 
 					var startMinutes = getStartMinutes($option);
