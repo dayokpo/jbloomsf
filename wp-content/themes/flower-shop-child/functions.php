@@ -234,3 +234,627 @@ function flower_shop_child_register_block_checkout_fields() {
 }
 
 add_action('woocommerce_init', 'flower_shop_child_register_block_checkout_fields');
+
+
+// Woo Delivery customizations Start Here
+
+function flower_shop_child_woo_delivery_hpos_enabled() {
+	if (!class_exists(\Automattic\WooCommerce\Utilities\OrderUtil::class)) {
+		return false;
+	}
+
+	return \Automattic\WooCommerce\Utilities\OrderUtil::custom_orders_table_usage_is_enabled();
+}
+
+function flower_shop_child_woo_delivery_test_minutes() {
+	if (!is_user_logged_in() || !current_user_can('manage_options')) {
+		return null;
+	}
+
+	if (empty($_GET['delivery_test_time'])) {
+		return null;
+	}
+
+	$raw_time = sanitize_text_field(wp_unslash($_GET['delivery_test_time']));
+
+	if (!preg_match('/^([01]?\d|2[0-3]):([0-5]\d)$/', $raw_time, $matches)) {
+		return null;
+	}
+
+	return ((int) $matches[1] * 60) + (int) $matches[2];
+}
+
+function flower_shop_child_woo_delivery_current_minutes() {
+	$test_minutes = flower_shop_child_woo_delivery_test_minutes();
+
+	if (null !== $test_minutes) {
+		return $test_minutes;
+	}
+
+	$current_timestamp = current_time('timestamp');
+
+	return ((int) wp_date('G', $current_timestamp) * 60) + (int) wp_date('i', $current_timestamp);
+}
+
+function flower_shop_child_woo_delivery_slot_duration($delivery_time_settings = null) {
+	if (null === $delivery_time_settings) {
+		$delivery_time_settings = get_option('coderockz_woo_delivery_time_settings');
+	}
+
+	$slot_duration = isset($delivery_time_settings['each_time_slot']) && !empty($delivery_time_settings['each_time_slot'])
+		? (int) $delivery_time_settings['each_time_slot']
+		: 0;
+
+	if ($slot_duration <= 0) {
+		$start_time = isset($delivery_time_settings['delivery_time_starts']) ? (int) $delivery_time_settings['delivery_time_starts'] : 0;
+		$end_time = isset($delivery_time_settings['delivery_time_ends']) ? (int) $delivery_time_settings['delivery_time_ends'] : 0;
+		$slot_duration = max($end_time - $start_time, 0);
+	}
+
+	return $slot_duration;
+}
+
+function flower_shop_child_woo_delivery_effective_current_time($delivery_time_settings = null) {
+	$current_time = flower_shop_child_woo_delivery_current_minutes();
+
+	// Explicit business rules:
+	// before 8:00 AM -> keep only 11:00 AM - 2:00 PM and later
+	// 8:00 AM to 11:59 AM -> keep only 2:00 PM - 5:00 PM
+	// 12:00 PM and above -> no same-day slots
+	if ($current_time < 480) {
+		return 659; // 10:59 AM
+	}
+
+	if ($current_time < 720) {
+		return 839; // 1:59 PM
+	}
+
+	return 1439; // End of day, effectively disables same-day slots.
+}
+
+function flower_shop_child_woo_delivery_last_slot_start($delivery_time_settings = null) {
+	if (null === $delivery_time_settings) {
+		$delivery_time_settings = get_option('coderockz_woo_delivery_time_settings');
+	}
+
+	$start_time = isset($delivery_time_settings['delivery_time_starts']) ? (int) $delivery_time_settings['delivery_time_starts'] : 0;
+	$end_time = isset($delivery_time_settings['delivery_time_ends']) ? (int) $delivery_time_settings['delivery_time_ends'] : 0;
+	$slot_duration = flower_shop_child_woo_delivery_slot_duration($delivery_time_settings);
+
+	if ($slot_duration <= 0 || $end_time <= $start_time) {
+		return $start_time;
+	}
+
+	$last_slot_start = $start_time;
+	$slot_start = $start_time;
+
+	while ($slot_start < $end_time) {
+		$slot_end = $slot_start + $slot_duration;
+		if ($slot_end > $end_time) {
+			$slot_end = $end_time;
+		}
+
+		$last_slot_start = $slot_start;
+		$slot_start = $slot_end;
+	}
+
+	return $last_slot_start;
+}
+
+function flower_shop_child_woo_delivery_should_disable_today($delivery_time_settings = null) {
+	$current_time = flower_shop_child_woo_delivery_current_minutes();
+
+	return $current_time >= 720;
+}
+
+function flower_shop_child_woo_delivery_pickup_disable_today($pickup_time_settings = null) {
+	if (null === $pickup_time_settings) {
+		$pickup_time_settings = get_option('coderockz_woo_delivery_pickup_settings');
+	}
+
+	$highest_pickupslot_end = isset($pickup_time_settings['pickup_time_ends']) ? (int) $pickup_time_settings['pickup_time_ends'] : 0;
+	$current_time = flower_shop_child_woo_delivery_current_minutes();
+
+	return $current_time > $highest_pickupslot_end;
+}
+
+function flower_shop_child_woo_delivery_get_delivery_order_ids($selected_date, $only_delivery_time = false) {
+	$use_hpos = flower_shop_child_woo_delivery_hpos_enabled();
+
+	if ($only_delivery_time) {
+		if ($use_hpos) {
+			$args = array(
+				'limit' => -1,
+				'type' => array('shop_order'),
+				'date_created' => $selected_date,
+				'meta_query' => array(
+					array(
+						'key' => 'delivery_type',
+						'value' => 'delivery',
+						'compare' => '==',
+					),
+				),
+				'return' => 'ids',
+			);
+		} else {
+			$args = array(
+				'limit' => -1,
+				'date_created' => $selected_date,
+				'delivery_type' => 'delivery',
+				'return' => 'ids',
+			);
+		}
+	} else {
+		if ($use_hpos) {
+			$args = array(
+				'limit' => -1,
+				'type' => array('shop_order'),
+				'meta_query' => array(
+					array(
+						'key' => 'delivery_date',
+						'value' => $selected_date,
+						'compare' => '==',
+					),
+				),
+				'return' => 'ids',
+			);
+		} else {
+			$args = array(
+				'limit' => -1,
+				'delivery_date' => $selected_date,
+				'return' => 'ids',
+			);
+		}
+	}
+
+	return wc_get_orders($args);
+}
+
+function flower_shop_child_woo_delivery_get_orders() {
+	check_ajax_referer('coderockz_woo_delivery_nonce');
+
+	$delivery_time_settings = get_option('coderockz_woo_delivery_time_settings');
+	$selected_date = isset($_POST['date']) ? sanitize_text_field(wp_unslash($_POST['date'])) : '';
+	$only_delivery_time = !empty($_POST['onlyDeliveryTime']);
+	$order_ids = flower_shop_child_woo_delivery_get_delivery_order_ids($selected_date, $only_delivery_time);
+	$delivery_times = array();
+	$use_hpos = flower_shop_child_woo_delivery_hpos_enabled();
+
+	foreach ($order_ids as $order_id) {
+		$order = wc_get_order($order_id);
+		if (!$order) {
+			continue;
+		}
+
+		if ($use_hpos) {
+			$delivery_time = $order->get_meta('delivery_time', true);
+		} else {
+			$delivery_time = get_post_meta($order_id, 'delivery_time', true);
+		}
+
+		if (!empty($delivery_time)) {
+			$delivery_times[] = $delivery_time;
+		}
+	}
+
+	$response = array(
+		'delivery_times' => $delivery_times,
+		'max_order_per_slot' => isset($delivery_time_settings['max_order_per_slot']) && !empty($delivery_time_settings['max_order_per_slot']) ? $delivery_time_settings['max_order_per_slot'] : 0,
+		'disabled_current_time_slot' => true,
+		'current_time' => flower_shop_child_woo_delivery_effective_current_time($delivery_time_settings),
+	);
+
+	wp_send_json_success(wp_json_encode($response));
+}
+
+function flower_shop_child_woo_delivery_option_delivery_time_pickup() {
+	check_ajax_referer('coderockz_woo_delivery_nonce');
+
+	$delivery_option = isset($_POST['deliveryOption']) ? sanitize_text_field(wp_unslash($_POST['deliveryOption'])) : '';
+	setcookie('coderockz_woo_delivery_option_time_pickup', $delivery_option, time() + DAY_IN_SECONDS, '/');
+
+	if (function_exists('WC') && null !== WC()->session) {
+		WC()->session->set('coderockz_woo_delivery_option_time_pickup', $delivery_option);
+	}
+
+	$delivery_time_settings = get_option('coderockz_woo_delivery_time_settings');
+	$pickup_time_settings = get_option('coderockz_woo_delivery_pickup_settings');
+	$disable_delivery_date_passed_time = array();
+	$disable_pickup_date_passed_time = array();
+
+	if (!empty($delivery_time_settings['enable_delivery_time']) && flower_shop_child_woo_delivery_should_disable_today($delivery_time_settings)) {
+		$disable_delivery_date_passed_time[] = wp_date('Y-m-d', current_time('timestamp', 1));
+	}
+
+	if (!empty($pickup_time_settings['enable_pickup_time']) && flower_shop_child_woo_delivery_pickup_disable_today($pickup_time_settings)) {
+		$disable_pickup_date_passed_time[] = wp_date('Y-m-d', current_time('timestamp', 1));
+	}
+
+	wp_send_json_success(
+		wp_json_encode(
+			array(
+				'disable_delivery_date_passed_time' => $disable_delivery_date_passed_time,
+				'disable_pickup_date_passed_time' => $disable_pickup_date_passed_time,
+			)
+		)
+	);
+}
+
+function flower_shop_child_woo_delivery_disable_max_delivery_pickup_date() {
+	check_ajax_referer('coderockz_woo_delivery_nonce');
+
+	$delivery_time_settings = get_option('coderockz_woo_delivery_time_settings');
+	$pickup_time_settings = get_option('coderockz_woo_delivery_pickup_settings');
+	$disable_delivery_date_passed_time = array();
+	$disable_pickup_date_passed_time = array();
+
+	if (!empty($delivery_time_settings['enable_delivery_time']) && flower_shop_child_woo_delivery_should_disable_today($delivery_time_settings)) {
+		$disable_delivery_date_passed_time[] = wp_date('Y-m-d', current_time('timestamp', 1));
+	}
+
+	if (!empty($pickup_time_settings['enable_pickup_time']) && flower_shop_child_woo_delivery_pickup_disable_today($pickup_time_settings)) {
+		$disable_pickup_date_passed_time[] = wp_date('Y-m-d', current_time('timestamp', 1));
+	}
+
+	wp_send_json_success(
+		wp_json_encode(
+			array(
+				'disable_delivery_date_passed_time' => $disable_delivery_date_passed_time,
+				'disable_pickup_date_passed_time' => $disable_pickup_date_passed_time,
+			)
+		)
+	);
+}
+
+function flower_shop_child_override_woo_delivery_ajax_actions() {
+	remove_all_actions('wp_ajax_coderockz_woo_delivery_get_orders');
+	remove_all_actions('wp_ajax_nopriv_coderockz_woo_delivery_get_orders');
+	remove_all_actions('wp_ajax_coderockz_woo_delivery_option_delivery_time_pickup');
+	remove_all_actions('wp_ajax_nopriv_coderockz_woo_delivery_option_delivery_time_pickup');
+	remove_all_actions('wp_ajax_coderockz_woo_delivery_disable_max_delivery_pickup_date');
+	remove_all_actions('wp_ajax_nopriv_coderockz_woo_delivery_disable_max_delivery_pickup_date');
+
+	add_action('wp_ajax_coderockz_woo_delivery_get_orders', 'flower_shop_child_woo_delivery_get_orders');
+	add_action('wp_ajax_nopriv_coderockz_woo_delivery_get_orders', 'flower_shop_child_woo_delivery_get_orders');
+	add_action('wp_ajax_coderockz_woo_delivery_option_delivery_time_pickup', 'flower_shop_child_woo_delivery_option_delivery_time_pickup');
+	add_action('wp_ajax_nopriv_coderockz_woo_delivery_option_delivery_time_pickup', 'flower_shop_child_woo_delivery_option_delivery_time_pickup');
+	add_action('wp_ajax_coderockz_woo_delivery_disable_max_delivery_pickup_date', 'flower_shop_child_woo_delivery_disable_max_delivery_pickup_date');
+	add_action('wp_ajax_nopriv_coderockz_woo_delivery_disable_max_delivery_pickup_date', 'flower_shop_child_woo_delivery_disable_max_delivery_pickup_date');
+}
+
+add_action('wp_loaded', 'flower_shop_child_override_woo_delivery_ajax_actions', 20);
+
+function flower_shop_child_validate_woo_delivery_timeslot($data, $errors) {
+	if (isset($_POST['coderockz_woo_delivery_delivery_selection_box']) && 'pickup' === wc_clean(wp_unslash($_POST['coderockz_woo_delivery_delivery_selection_box']))) {
+		return;
+	}
+
+	if (empty($_POST['coderockz_woo_delivery_date_field']) || empty($_POST['coderockz_woo_delivery_time_field'])) {
+		return;
+	}
+
+	$selected_date = date('Y-m-d', strtotime(sanitize_text_field(wp_unslash($_POST['coderockz_woo_delivery_date_field']))));
+	$today = wp_date('Y-m-d', current_time('timestamp', 1));
+
+	if ($selected_date !== $today) {
+		return;
+	}
+
+	$time_parts = explode(' - ', sanitize_text_field(wp_unslash($_POST['coderockz_woo_delivery_time_field'])));
+	if (count($time_parts) !== 2) {
+		return;
+	}
+
+	$slot_start_parts = explode(':', $time_parts[0]);
+	if (count($slot_start_parts) !== 2) {
+		return;
+	}
+
+	$slot_start = ((int) $slot_start_parts[0] * 60) + (int) $slot_start_parts[1];
+	$effective_current_time = flower_shop_child_woo_delivery_effective_current_time(get_option('coderockz_woo_delivery_time_settings'));
+
+	if ($effective_current_time >= $slot_start) {
+		$errors->add('flower_shop_child_delivery_time', __('Selected delivery time is no longer available today. Please choose a later date.', 'flower-shop-child'));
+	}
+}
+
+add_action('woocommerce_after_checkout_validation', 'flower_shop_child_validate_woo_delivery_timeslot', 20, 2);
+
+function flower_shop_child_enforce_delivery_slots_frontend() {
+	if (!function_exists('is_checkout') || !is_checkout()) {
+		return;
+	}
+
+	$current_timestamp = current_time('timestamp');
+	$server_current_minutes = flower_shop_child_woo_delivery_current_minutes();
+	$server_today_date = wp_date('Y-m-d', $current_timestamp);
+	$test_minutes = flower_shop_child_woo_delivery_test_minutes();
+	?>
+	<script>
+		(function($) {
+			var serverCurrentMinutes = <?php echo (int) $server_current_minutes; ?>;
+			var serverTodayDate = '<?php echo esc_js($server_today_date); ?>';
+			var forcedTestMinutes = <?php echo null === $test_minutes ? 'null' : (int) $test_minutes; ?>;
+			var enforceTimer = null;
+			var isProgrammaticUpdate = false;
+			var observerDebounce = null;
+
+			function getBrowserCurrentMinutes() {
+				if (forcedTestMinutes !== null) {
+					return forcedTestMinutes;
+				}
+
+				var now = new Date();
+				return (now.getHours() * 60) + now.getMinutes();
+			}
+
+			function getBrowserTodayYmd() {
+				var now = new Date();
+				var year = now.getFullYear();
+				var month = ('0' + (now.getMonth() + 1)).slice(-2);
+				var day = ('0' + now.getDate()).slice(-2);
+				return year + '-' + month + '-' + day;
+			}
+
+			function getBrowserNextDayYmd() {
+				var now = new Date();
+				now.setDate(now.getDate() + 1);
+				var year = now.getFullYear();
+				var month = ('0' + (now.getMonth() + 1)).slice(-2);
+				var day = ('0' + now.getDate()).slice(-2);
+				return year + '-' + month + '-' + day;
+			}
+
+			function setNativeInputValue(el, value) {
+				if (!el) {
+					return;
+				}
+
+				var prototype = Object.getPrototypeOf(el);
+				var descriptor = Object.getOwnPropertyDescriptor(prototype, 'value');
+				if (descriptor && descriptor.set) {
+					descriptor.set.call(el, value);
+				} else {
+					el.value = value;
+				}
+
+				el.dispatchEvent(new Event('input', { bubbles: true }));
+				el.dispatchEvent(new Event('change', { bubbles: true }));
+			}
+
+			function selectNextDayForBlockCheckout($dateInput, $hiddenDateInput, fp) {
+				var nextDayYmd = getBrowserNextDayYmd();
+				var currentValue = $hiddenDateInput && $hiddenDateInput.length ? $.trim($hiddenDateInput.val() || '') : '';
+
+				if (currentValue === nextDayYmd) {
+					return false;
+				}
+
+				isProgrammaticUpdate = true;
+
+				if (fp) {
+					fp.setDate(nextDayYmd, true, 'Y-m-d');
+					setTimeout(function() {
+						isProgrammaticUpdate = false;
+					}, 300);
+					return true;
+				}
+
+				if ($hiddenDateInput && $hiddenDateInput.length) {
+					setNativeInputValue($hiddenDateInput.get(0), nextDayYmd);
+				}
+
+				if ($dateInput && $dateInput.length) {
+					setNativeInputValue($dateInput.get(0), nextDayYmd);
+				}
+
+				setTimeout(function() {
+					isProgrammaticUpdate = false;
+				}, 300);
+
+				return true;
+			}
+
+			function parseMinutes(timePart) {
+				var match = $.trim(timePart).match(/^(\d{1,2})\s*:\s*(\d{2})(?:\s*([AaPp][Mm]))?$/);
+				if (!match) {
+					return null;
+				}
+
+				var hour = parseInt(match[1], 10);
+				var minute = parseInt(match[2], 10);
+				var suffix = match[3] ? match[3].toUpperCase() : null;
+
+				if (suffix) {
+					if (hour === 12) {
+						hour = 0;
+					}
+					if (suffix === 'PM') {
+						hour += 12;
+					}
+				}
+
+				return (hour * 60) + minute;
+			}
+
+			function getStartMinutes($option) {
+				var value = $.trim($option.val() || '');
+				var text = $.trim($option.text() || '');
+				var source = value || text;
+				var range = source.split(' - ');
+
+				if (range.length < 2) {
+					range = text.split(' - ');
+				}
+
+				if (range.length < 2) {
+					return null;
+				}
+
+				return parseMinutes(range[0]);
+			}
+
+			function mustDisableTodaySlot(startMinutes, currentMinutes) {
+				if (currentMinutes < 480) {
+					return startMinutes < 660;
+				}
+
+				if (currentMinutes < 720) {
+					return startMinutes < 840;
+				}
+
+				return true;
+			}
+
+			function applyDeliverySlotRules() {
+				if (isProgrammaticUpdate) {
+					return;
+				}
+
+				var $wrapper = $('#coderockz_woo_delivery_setting_wrapper');
+				var $dateInput = $('#coderockz_woo_delivery_date').first();
+				var $timeSelect = $('#coderockz_woo_delivery_time_field, #coderockz_woo_delivery_time').first();
+				var $hiddenDateInput = $("input:hidden[name='coderockz_woo_delivery_date']").first();
+
+				if (!$dateInput.length && $hiddenDateInput.length) {
+					$dateInput = $hiddenDateInput;
+				}
+
+				if (!$dateInput.length) {
+					return;
+				}
+
+				var browserTodayDate = getBrowserTodayYmd();
+				var todayDate = $.trim(browserTodayDate || $wrapper.data('today_date') || serverTodayDate || '');
+				var selectedDate = $.trim($dateInput.val() || '');
+				var currentMinutes = getBrowserCurrentMinutes();
+				var dateInputElement = $dateInput.get(0);
+				var fp = dateInputElement && dateInputElement._flatpickr ? dateInputElement._flatpickr : null;
+
+				if (!selectedDate && $hiddenDateInput.length) {
+					selectedDate = $.trim($hiddenDateInput.val() || '');
+				}
+
+				if (fp && fp.selectedDates && fp.selectedDates.length) {
+					selectedDate = fp.formatDate(fp.selectedDates[0], 'Y-m-d');
+				}
+
+				if (todayDate && currentMinutes >= 720) {
+					if (fp) {
+						var enableConfig = Array.isArray(fp.config.enable) ? fp.config.enable.slice() : [];
+						var disableConfig = Array.isArray(fp.config.disable) ? fp.config.disable.slice() : [];
+
+						if (enableConfig.length) {
+							enableConfig = enableConfig.filter(function(item) {
+								if (item instanceof Date) {
+									return fp.formatDate(item, 'Y-m-d') !== todayDate;
+								}
+								if (typeof item !== 'string') {
+									return true;
+								}
+								return $.trim(item) !== todayDate;
+							});
+							fp.set('enable', enableConfig);
+						}
+
+						if (disableConfig.indexOf(todayDate) === -1) {
+							disableConfig.push(todayDate);
+							fp.set('disable', disableConfig);
+						}
+
+						if (selectedDate === todayDate) {
+							if (selectNextDayForBlockCheckout($dateInput, $hiddenDateInput, fp) && $timeSelect.length) {
+								$timeSelect.val('');
+							}
+							return;
+						}
+					} else if (selectedDate === todayDate) {
+						if (selectNextDayForBlockCheckout($dateInput, $hiddenDateInput, fp) && $timeSelect.length) {
+							$timeSelect.val('');
+						}
+						return;
+					}
+				}
+
+				if (!$timeSelect.length || !todayDate || selectedDate !== todayDate) {
+					return;
+				}
+				var selectedWasDisabled = false;
+
+				$timeSelect.find('option').each(function() {
+					var $option = $(this);
+					var optionValue = $.trim($option.val() || '');
+
+					if (!optionValue) {
+						return;
+					}
+
+					var startMinutes = getStartMinutes($option);
+					if (startMinutes === null) {
+						return;
+					}
+
+					if (mustDisableTodaySlot(startMinutes, currentMinutes)) {
+						if ($option.is(':selected')) {
+							selectedWasDisabled = true;
+						}
+						$option.prop('disabled', true);
+					}
+				});
+
+				if (selectedWasDisabled) {
+					$timeSelect.val('');
+				}
+			}
+
+			function scheduleApplyDeliverySlotRules() {
+				if (enforceTimer) {
+					clearTimeout(enforceTimer);
+					enforceTimer = null;
+				}
+
+				applyDeliverySlotRules();
+				setTimeout(applyDeliverySlotRules, 200);
+				setTimeout(applyDeliverySlotRules, 600);
+				enforceTimer = setTimeout(function() {
+					applyDeliverySlotRules();
+					enforceTimer = null;
+				}, 1200);
+			}
+
+			function watchBlockDateContainer() {
+				var container = document.querySelector('.coderockz-woo-delivery-date-container');
+				if (!container || !window.MutationObserver) {
+					return;
+				}
+
+				var observer = new MutationObserver(function() {
+					if (observerDebounce) {
+						clearTimeout(observerDebounce);
+					}
+
+					observerDebounce = setTimeout(function() {
+						scheduleApplyDeliverySlotRules();
+					}, 150);
+				});
+
+				observer.observe(container, {
+					attributes: true,
+					childList: true,
+					subtree: true,
+				});
+			}
+
+			$(document).ready(scheduleApplyDeliverySlotRules);
+			$(document).ready(watchBlockDateContainer);
+			$(document.body).on('updated_checkout', scheduleApplyDeliverySlotRules);
+			$(document).on('change input', '#coderockz_woo_delivery_date, input[name="coderockz_woo_delivery_date"]', scheduleApplyDeliverySlotRules);
+			$(document).on('change', '#coderockz_woo_delivery_delivery_selection_box', scheduleApplyDeliverySlotRules);
+		})(jQuery);
+	</script>
+	<?php
+}
+
+add_action('wp_footer', 'flower_shop_child_enforce_delivery_slots_frontend', 99);
+
+// End of Woo Delivery customizations
