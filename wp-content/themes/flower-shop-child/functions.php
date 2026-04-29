@@ -676,6 +676,7 @@ function flower_shop_child_enforce_delivery_slots_frontend() {
 			var enforceTimer = null;
 			var isProgrammaticUpdate = false;
 			var observerDebounce = null;
+			var userHasManuallyChangedDate = false;
 
 			if (window.console && typeof window.console.log === 'function') {
 				console.log('[Delivery Debug] WP datetime:', debugWpDatetime, '| delivery_test_time:', debugDeliveryTestTime, '| forcedTestMinutes:', forcedTestMinutes);
@@ -949,7 +950,10 @@ function flower_shop_child_enforce_delivery_slots_frontend() {
 						}
 					}
 
-					if (!selectedDate || isAfterTodayYmd(selectedDate, todayDate)) {
+					var nextDayYmd = getBrowserNextDayYmd();
+					var shouldAutoCorrectPreNoon = (!selectedDate) || (!userHasManuallyChangedDate && selectedDate === nextDayYmd);
+
+					if (shouldAutoCorrectPreNoon) {
 						isProgrammaticUpdate = true;
 
 						if (fp) {
@@ -1052,6 +1056,11 @@ function flower_shop_child_enforce_delivery_slots_frontend() {
 			$(document).ready(scheduleApplyDeliverySlotRules);
 			$(document).ready(watchBlockDateContainer);
 			$(document.body).on('updated_checkout', scheduleApplyDeliverySlotRules);
+			$(document).on('change input', '#coderockz_woo_delivery_date, input[name="coderockz_woo_delivery_date"]', function() {
+				if (!isProgrammaticUpdate) {
+					userHasManuallyChangedDate = true;
+				}
+			});
 			$(document).on('change input', '#coderockz_woo_delivery_date, input[name="coderockz_woo_delivery_date"]', scheduleApplyDeliverySlotRules);
 			$(document).on('change', '#coderockz_woo_delivery_delivery_selection_box', scheduleApplyDeliverySlotRules);
 		})(jQuery);
