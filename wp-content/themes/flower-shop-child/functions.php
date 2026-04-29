@@ -249,10 +249,6 @@ function flower_shop_child_woo_delivery_hpos_enabled() {
 function flower_shop_child_maybe_persist_delivery_test_time() {
 	$cookie_key = 'flower_shop_delivery_test_time';
 
-	if (!is_user_logged_in() || !current_user_can('manage_options')) {
-		return;
-	}
-
 	if (empty($_GET['delivery_test_time'])) {
 		return;
 	}
@@ -292,22 +288,13 @@ function flower_shop_child_woo_delivery_test_minutes() {
 	$cookie_key = 'flower_shop_delivery_test_time';
 
 	if (!empty($_REQUEST['delivery_test_time'])) {
-		if (!is_user_logged_in() || !current_user_can('manage_options')) {
-			return null;
-		}
-
 		$raw_time = sanitize_text_field(wp_unslash($_REQUEST['delivery_test_time']));
 		if (preg_match('/^([01]?\d|2[0-3]):([0-5]\d)$/', $raw_time, $matches)) {
 			return ((int) $matches[1] * 60) + (int) $matches[2];
 		}
 	}
 
-	// Admin-only switch from query parameter.
 	if (!empty($_GET['delivery_test_time'])) {
-		if (!is_user_logged_in() || !current_user_can('manage_options')) {
-			return null;
-		}
-
 		$raw_time = sanitize_text_field(wp_unslash($_GET['delivery_test_time']));
 
 		if ('off' === strtolower($raw_time)) {
@@ -357,10 +344,6 @@ function flower_shop_child_woo_delivery_current_minutes() {
 
 function flower_shop_child_woo_delivery_test_time_display() {
 	$cookie_key = 'flower_shop_delivery_test_time';
-
-	if (!is_user_logged_in() || !current_user_can('manage_options')) {
-		return 'off';
-	}
 
 	if (!empty($_GET['delivery_test_time'])) {
 		$raw_time = sanitize_text_field(wp_unslash($_GET['delivery_test_time']));
@@ -679,11 +662,9 @@ function flower_shop_child_enforce_delivery_slots_frontend() {
 	$debug_wp_datetime = wp_date('Y-m-d H:i:s', $current_timestamp);
 	$debug_test_time = flower_shop_child_woo_delivery_test_time_display();
 
-	if (is_user_logged_in() && current_user_can('manage_options')) {
-		echo '<div id="flower-shop-delivery-debug" style="position:fixed;top:0;left:0;right:0;z-index:999999;background:#111;color:#fff;padding:8px 12px;font:12px/1.4 monospace;">';
-		echo '<strong>Delivery Debug</strong> | WP datetime: ' . esc_html($debug_wp_datetime) . ' | delivery_test_time: ' . esc_html($debug_test_time);
-		echo '</div>';
-	}
+	echo '<div id="flower-shop-delivery-debug" style="position:fixed;top:0;left:0;right:0;z-index:999999;background:#111;color:#fff;padding:8px 12px;font:12px/1.4 monospace;">';
+	echo '<strong>Delivery Debug</strong> | WP datetime: ' . esc_html($debug_wp_datetime) . ' | delivery_test_time: ' . esc_html($debug_test_time);
+	echo '</div>';
 	?>
 	<script>
 		(function($) {
