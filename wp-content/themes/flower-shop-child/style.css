@@ -119,7 +119,11 @@ a.prad-absolute.prad-fron-edit-addon{
 
 .flower-shop-category-featured-image {
     max-width: 1200px;
-    margin: auto;
+    margin: auto !important;
+}
+
+.headline_aligner, .cmsmasters_breadcrumbs_aligner {
+    min-height: auto !important;
 }
 
 @media only screen and (min-width: 1024px) {

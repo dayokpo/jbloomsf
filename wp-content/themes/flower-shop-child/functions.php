@@ -1206,16 +1206,18 @@ function flower_shop_child_relocate_category_featured_image() {
 			var img = document.querySelector('.flower-shop-category-featured-image');
 			if (!img) return;
 
-			// Target: before the content_wrap div that holds content + sidebar
-			var wrap = document.querySelector('.content_wrap') || document.querySelector('.middle_inner') || document.querySelector('#middle');
-			if (!wrap) return;
+			// Target: before .headline_text
+			var anchor = document.querySelector('.headline_text')
+				|| document.querySelector('.headline_inner')
+				|| document.querySelector('.content_wrap');
+			if (!anchor) return;
 
 			// Already in the right place
-			if (img.parentNode === wrap.parentNode && img.nextSibling === wrap) return;
+			if (img.parentNode === anchor.parentNode && img.nextSibling === anchor) return;
 
 			img.parentNode.removeChild(img);
-			img.style.cssText = 'display:block;width:100%;margin:0 0 24px;';
-			wrap.parentNode.insertBefore(img, wrap);
+			img.style.cssText = 'display:block;width:100%;margin:0 0 0;';
+			anchor.parentNode.insertBefore(img, anchor);
 		}
 
 		if (document.readyState === 'loading') {
