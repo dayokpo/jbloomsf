@@ -1,15 +1,20 @@
-(function ($) {
+﻿(function ($) {
     'use strict';
 
     var config = window.flowerShopCheckoutData || {};
     var provinceOptions = config.provinceOptions || {};
     var addressDataUrl = config.cityDataUrl || '';
+    var barangayDataUrl = config.barangayDataUrl || '';
     var selectCityText = (config.i18n && config.i18n.selectCity) || 'Select City / Municipality';
+    var selectBarangayText = (config.i18n && config.i18n.selectBarangay) || 'Select Barangay';
+
     var cityData = null;
+    var barangayData = null;
     var refreshTimer = null;
     var pendingResetPrefixes = {};
     var latestSelectedCities = {};
     var latestSelectedPostcodes = {};
+    var latestSelectedBarangays = {};
 
     function normalize(value) {
         return String(value || '')
@@ -132,6 +137,15 @@
                 'select[autocomplete$="address-level2"][id*="' + prefix + '"]',
                 'select[autocomplete$="address-level2"][name*="' + prefix + '"]'
             ];
+        } else if (fieldType === 'barangay') {
+            selectors = [
+                '#' + prefix + '_address_1',
+                '#' + prefix + '-address_1',
+                '[name="' + prefix + '_address_1"]',
+                '[name="' + prefix + '-address_1"]',
+                'input[autocomplete$="address-line1"][id*="' + prefix + '"]',
+                'select[autocomplete$="address-line1"][id*="' + prefix + '"]'
+            ];
         } else if (fieldType === 'country') {
             selectors = [
                 '#' + prefix + '_country',
@@ -152,7 +166,10 @@
             ];
         }
 
-        return $(selectors.join(',')).not('.flower-shop-generated-city-select').first();
+        return $(selectors.join(','))
+            .not('.flower-shop-generated-city-select')
+            .not('.flower-shop-generated-barangay-select')
+            .first();
     }
 
     function isPhilippinesSelected(prefix) {
@@ -226,6 +243,59 @@
         }
 
         $cityInput.attr('type', 'hidden').hide();
+        return $select;
+    }
+
+    function ensureGeneratedBarangaySelect(prefix, $barangayInput) {
+        var $existing = $('select.flower-shop-generated-barangay-select[data-prefix="' + prefix + '"]').first();
+
+        if ($existing.length) {
+            return $existing;
+        }
+
+        var $provinceField = findField(prefix, 'state');
+        var isBlockSelect = $provinceField.hasClass('wc-blocks-components-select__select');
+        var fieldId = ($barangayInput.attr('id') || (prefix + '-address_1')) + '-select';
+        var labelText = 'Barangay';
+        var classNames = [
+            $barangayInput.attr('class') || '',
+            $provinceField.attr('class') || '',
+            'flower-shop-generated-barangay-select'
+        ].join(' ').replace(/\s+/g, ' ').trim();
+        var $select = $('<select>', {
+            id: fieldId,
+            'class': classNames,
+            'data-prefix': prefix,
+            autocomplete: 'address-line1',
+            'aria-invalid': 'false'
+        });
+
+        if (isBlockSelect) {
+            labelText = $.trim($barangayInput.closest('.wc-block-components-address-form__address_1').find('label').first().text()) || labelText;
+
+            var $wrapper = $('<div>', {
+                'class': 'wc-blocks-components-select flower-shop-generated-barangay-select-wrapper',
+                'data-prefix': prefix
+            });
+            var $container = $('<div>', {
+                'class': 'wc-blocks-components-select__container'
+            });
+            var $label = $('<label>', {
+                'for': fieldId,
+                'class': 'wc-blocks-components-select__label',
+                text: labelText
+            });
+            var $icon = $('<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" width="24" height="24" class="wc-blocks-components-select__expand" aria-hidden="true" focusable="false"><path d="M17.5 11.6L12 16l-5.5-4.4.9-1.2L12 14l4.5-3.6 1 1.2z"></path></svg>');
+
+            $container.append($label).append($select).append($icon);
+            $wrapper.append($container);
+            $barangayInput.after($wrapper);
+        } else {
+            $barangayInput.after($select);
+        }
+
+        $barangayInput.attr('type', 'hidden').hide();
+        $barangayInput.closest('.wc-block-components-address-form__address_1').addClass('flower-shop-has-generated-barangay');
 
         return $select;
     }
@@ -254,20 +324,100 @@
         triggerFieldEvents($postcodeInput.get(0));
     }
 
+    function syncBarangayValue($barangayInput, value) {
+        if (!$barangayInput.length) {
+            return;
+        }
+
+        setFieldValue($barangayInput.get(0), value || '');
+        triggerFieldEvents($barangayInput.get(0));
+    }
+
     function resetAddressSelection(prefix) {
         var $cityField = findField(prefix, 'city');
         var $postcodeField = findField(prefix, 'postcode');
+        var $barangayField = findField(prefix, 'barangay');
         var $citySelect = $('select.flower-shop-generated-city-select[data-prefix="' + prefix + '"]').first();
+        var $barangaySelect = $('select.flower-shop-generated-barangay-select[data-prefix="' + prefix + '"]').first();
 
         latestSelectedCities[prefix] = '';
         latestSelectedPostcodes[prefix] = '';
+        latestSelectedBarangays[prefix] = '';
 
         if ($citySelect.length) {
             $citySelect.val('');
         }
 
+        if ($barangaySelect.length) {
+            $barangaySelect.val('');
+        }
+
         syncCityValue($cityField, '');
         syncPostcodeValue($postcodeField, '', prefix);
+        syncBarangayValue($barangayField, '');
+    }
+
+    function repopulateBarangaySelect(prefix, shouldReset) {
+        if (!barangayData) {
+            return;
+        }
+
+        var $barangayField = findField(prefix, 'barangay');
+
+        if (!$barangayField.length) {
+            return;
+        }
+
+        var $citySelect = $('select.flower-shop-generated-city-select[data-prefix="' + prefix + '"]').first();
+        var selectedCity = $citySelect.length ? $citySelect.val() : findField(prefix, 'city').val();
+        var barangays = (selectedCity && barangayData[selectedCity]) ? barangayData[selectedCity] : [];
+        var $barangaySelect = $barangayField.is('select.flower-shop-generated-barangay-select')
+            ? $barangayField
+            : ensureGeneratedBarangaySelect(prefix, $barangayField);
+        var currentBarangay = shouldReset ? '' : ($barangaySelect.val() || latestSelectedBarangays[prefix] || $barangayField.val() || '');
+
+        $barangaySelect.empty();
+        $barangaySelect.append($('<option>', {
+            value: '',
+            text: selectBarangayText
+        }));
+
+        if (!barangays.length) {
+            latestSelectedBarangays[prefix] = '';
+            $barangaySelect.prop('disabled', true);
+            syncBarangayValue($barangayField, '');
+            return;
+        }
+
+        var matchedCurrent = false;
+
+        $.each(barangays, function (_, barangayName) {
+            var isSelected = normalize(currentBarangay) === normalize(barangayName);
+
+            if (isSelected) {
+                matchedCurrent = true;
+            }
+
+            $barangaySelect.append($('<option>', {
+                value: barangayName,
+                text: barangayName,
+                selected: isSelected
+            }));
+        });
+
+        var selectedBarangayValue = currentBarangay && matchedCurrent ? currentBarangay : '';
+
+        $barangaySelect.val(selectedBarangayValue);
+        $barangaySelect.prop('disabled', false);
+        $barangaySelect.off('change.flowerShopBarangay').on('change.flowerShopBarangay', function () {
+            var value = $(this).val() || '';
+
+            latestSelectedBarangays[prefix] = value;
+            syncBarangayValue($barangayField, value);
+        });
+
+        latestSelectedBarangays[prefix] = selectedBarangayValue;
+        syncBarangayValue($barangayField, selectedBarangayValue);
     }
 
     function repopulateCitySelect(prefix, shouldReset) {
@@ -307,6 +457,7 @@
             $citySelect.prop('disabled', true);
             syncCityValue($cityField, '');
             syncPostcodeValue($postcodeField, '', prefix);
+            repopulateBarangaySelect(prefix, true);
             return;
         }
 
@@ -338,12 +489,14 @@
         $citySelect.val(selectedCityValue);
         $citySelect.prop('disabled', false);
         $citySelect.off('change.flowerShopCity').on('change.flowerShopCity', function () {
-            var selectedCity = $(this).val();
+            var selectedCity = $(this).val() || '';
             var resolvedPostcode = selectedCity ? resolvePostcode(cityMap, selectedCity) : '';
 
-            latestSelectedCities[prefix] = selectedCity || '';
+            latestSelectedCities[prefix] = selectedCity;
+            latestSelectedBarangays[prefix] = '';
             syncCityValue($cityField, selectedCity);
             syncPostcodeValue($postcodeField, resolvedPostcode || (selectedCity ? latestSelectedPostcodes[prefix] || '' : ''), prefix);
+            repopulateBarangaySelect(prefix, true);
         });
 
         if ($postcodeField.length) {
@@ -357,6 +510,12 @@
         latestSelectedCities[prefix] = selectedCityValue;
         syncCityValue($cityField, selectedCityValue);
         syncPostcodeValue($postcodeField, resolvedInitialPostcode || (selectedCityValue ? latestSelectedPostcodes[prefix] || '' : ''), prefix);
+        repopulateBarangaySelect(prefix, false);
+    }
+
+    function initializeBarangayDropdowns(resetPrefix) {
+        repopulateBarangaySelect('billing', !!resetPrefix && resetPrefix === 'billing');
+        repopulateBarangaySelect('shipping', !!resetPrefix && resetPrefix === 'shipping');
     }
 
     function initializeAddressDropdowns() {
@@ -389,6 +548,12 @@
                 scheduleRefresh(prefix);
                 $(document.body).trigger('update_checkout');
             })
+            .on('change', 'select.flower-shop-generated-city-select', function () {
+                var prefix = $(this).data('prefix') || 'billing';
+
+                latestSelectedBarangays[prefix] = '';
+                repopulateBarangaySelect(prefix, true);
+            })
             .on('updated_checkout', function () {
                 scheduleRefresh();
             });
@@ -415,8 +580,21 @@
             });
     }
 
+    function loadBarangayData() {
+        if (!barangayDataUrl) {
+            return;
+        }
+
+        $.getJSON(barangayDataUrl)
+            .done(function (response) {
+                barangayData = response || {};
+                initializeBarangayDropdowns();
+            });
+    }
+
     $(function () {
         bindEvents();
         loadCityData();
+        loadBarangayData();
     });
 }(jQuery));

@@ -71,9 +71,11 @@ function flower_shop_child_enqueue_checkout_scripts() {
 		'flowerShopCheckoutData',
 		array(
 			'cityDataUrl' => add_query_arg('ver', flower_shop_child_asset_version('/assets/data/ph-addresses.json'), get_stylesheet_directory_uri() . '/assets/data/ph-addresses.json'),
+			'barangayDataUrl' => add_query_arg('ver', flower_shop_child_asset_version('/assets/data/ph-barangays.json'), get_stylesheet_directory_uri() . '/assets/data/ph-barangays.json'),
 			'provinceOptions' => WC()->countries->get_states('PH'),
 			'i18n' => array(
-				'selectCity' => __('Select City / Municipality', 'flower-shop-child'),
+				'selectCity'     => __('Select City / Municipality', 'flower-shop-child'),
+				'selectBarangay' => __('Select Barangay', 'flower-shop-child'),
 			),
 		)
 	);
@@ -114,7 +116,7 @@ function flower_shop_child_customize_checkout_location_fields($fields) {
 			$fields[$group][$state_key]['label'] = __('Province', 'flower-shop-child');
 			$fields[$group][$state_key]['options'] = $province_options;
 			$fields[$group][$state_key]['required'] = true;
-			$fields[$group][$state_key]['priority'] = 65;
+			$fields[$group][$state_key]['priority'] = 45;
 			$fields[$group][$state_key]['class'] = array('form-row-wide', 'address-field', 'update_totals_on_change');
 		}
 
@@ -123,15 +125,33 @@ function flower_shop_child_customize_checkout_location_fields($fields) {
 			$fields[$group][$city_key]['label'] = __('City / Municipality', 'flower-shop-child');
 			$fields[$group][$city_key]['options'] = $city_options;
 			$fields[$group][$city_key]['required'] = true;
-			$fields[$group][$city_key]['priority'] = 66;
+			$fields[$group][$city_key]['priority'] = 46;
 			$fields[$group][$city_key]['class'] = array('form-row-wide', 'address-field', 'update_totals_on_change');
+		}
+
+		$address1_key = $group . '_address_1';
+		$address2_key = $group . '_address_2';
+
+		if (isset($fields[$group][$address1_key])) {
+			$fields[$group][$address1_key]['type'] = 'select';
+			$fields[$group][$address1_key]['label'] = __('Barangay', 'flower-shop-child');
+			$fields[$group][$address1_key]['options'] = array('' => __('Select Barangay', 'flower-shop-child'));
+			$fields[$group][$address1_key]['required'] = true;
+			$fields[$group][$address1_key]['class'] = array('form-row-wide', 'address-field');
+		}
+
+		if (isset($fields[$group][$address2_key])) {
+			$fields[$group][$address2_key]['label'] = __('Street Address / House #', 'flower-shop-child');
+			$fields[$group][$address2_key]['placeholder'] = __('Street Address / House #', 'flower-shop-child');
+			$fields[$group][$address2_key]['required'] = true;
+			$fields[$group][$address2_key]['class'] = array('form-row-wide', 'address-field');
 		}
 	}
 
 	$fields['order']['special_message'] = array(
 		'type' => 'textarea',
-		'label' => __('Special Message', 'flower-shop-child'),
-		'placeholder' => __('Add a note or message for your order (optional)', 'flower-shop-child'),
+		'label' => __('Special Message (optional) - Maximum 15 words', 'flower-shop-child'),
+		'placeholder' => __('Add a note or message for your order (optional) - Maximum 15 words', 'flower-shop-child'),
 		'required' => false,
 		'class' => array('form-row-wide'),
 		'priority' => 110,
@@ -141,6 +161,37 @@ function flower_shop_child_customize_checkout_location_fields($fields) {
 }
 
 add_filter('woocommerce_checkout_fields', 'flower_shop_child_customize_checkout_location_fields');
+
+// Block checkout reads field order from country locale data
+function flower_shop_child_reorder_ph_address_locale($locale) {
+	if (!isset($locale['PH'])) {
+		$locale['PH'] = array();
+	}
+
+	$locale['PH']['state'] = array_merge(
+		isset($locale['PH']['state']) ? $locale['PH']['state'] : array(),
+		array('priority' => 45)
+	);
+
+	$locale['PH']['city'] = array_merge(
+		isset($locale['PH']['city']) ? $locale['PH']['city'] : array(),
+		array('priority' => 46)
+	);
+
+	$locale['PH']['address_1'] = array_merge(
+		isset($locale['PH']['address_1']) ? $locale['PH']['address_1'] : array(),
+		array('label' => __('Barangay', 'flower-shop-child'), 'placeholder' => __('Barangay', 'flower-shop-child'))
+	);
+
+	$locale['PH']['address_2'] = array_merge(
+		isset($locale['PH']['address_2']) ? $locale['PH']['address_2'] : array(),
+		array('label' => __('Street Address / House #', 'flower-shop-child'), 'placeholder' => __('Street Address / House #', 'flower-shop-child'), 'required' => true, 'hidden' => false)
+	);
+
+	return $locale;
+}
+
+add_filter('woocommerce_get_country_locale', 'flower_shop_child_reorder_ph_address_locale', 20);
 
 function flower_shop_child_default_checkout_country($country) {
 	return empty($country) ? 'PH' : $country;
@@ -173,6 +224,20 @@ add_filter('default_checkout_shipping_country', 'flower_shop_child_default_check
 add_filter('default_checkout_billing_state', 'flower_shop_child_default_checkout_state');
 add_filter('default_checkout_shipping_state', 'flower_shop_child_default_checkout_state');
 add_action('woocommerce_after_checkout_validation', 'flower_shop_child_validate_allowed_shipping_states');
+
+function flower_shop_child_validate_special_message($data, $errors) {
+	if (empty($data['special_message'])) {
+		return;
+	}
+
+	$word_count = str_word_count(trim($data['special_message']));
+
+	if ($word_count > 15) {
+		$errors->add('special_message_too_long', __('Special Message must not exceed 15 words.', 'flower-shop-child'));
+	}
+}
+
+add_action('woocommerce_after_checkout_validation', 'flower_shop_child_validate_special_message', 10, 2);
 
 function flower_shop_child_save_special_message($order, $data) {
 	if (!empty($data['special_message'])) {
@@ -222,18 +287,30 @@ function flower_shop_child_register_block_checkout_fields() {
 	woocommerce_register_additional_checkout_field(
 		array(
 			'id'         => 'flower-shop-child/special-message',
-			'label'      => __('Special Message', 'flower-shop-child'),
+			'label'      => __('Special Message (optional) - Maximum 15 words', 'flower-shop-child'),
 			'location'   => 'order',
 			'type'       => 'text',
 			'required'   => false,
 			'attributes' => array(
-				'placeholder' => __('Add a note or message for your order (optional)', 'flower-shop-child'),
+				'placeholder' => __('Add a note or message - Maximum 15 words', 'flower-shop-child'),
 			),
 		)
 	);
 }
 
 add_action('woocommerce_init', 'flower_shop_child_register_block_checkout_fields');
+
+function flower_shop_child_validate_block_special_message( $errors, $field_key, $field_value ) {
+	if ( 'flower-shop-child/special-message' !== $field_key || empty( $field_value ) ) {
+		return;
+	}
+
+	if ( str_word_count( trim( $field_value ) ) > 15 ) {
+		$errors->add( 'special_message_too_long', __( 'Special Message must not exceed 15 words.', 'flower-shop-child' ) );
+	}
+}
+
+add_action( 'woocommerce_validate_additional_field', 'flower_shop_child_validate_block_special_message', 10, 3 );
 
 
 // Woo Delivery customizations Start Here
@@ -270,8 +347,34 @@ function flower_shop_child_woo_delivery_slot_duration($delivery_time_settings = 
 	return $slot_duration;
 }
 
+function flower_shop_child_cart_has_same_day_item() {
+	if (!function_exists('WC') || !WC()->cart) {
+		return false;
+	}
+
+	$cart = WC()->cart->get_cart();
+
+	if (empty($cart)) {
+		return false;
+	}
+
+	// ALL items must belong to same-day-delivery for same-day slots to be available
+	foreach ($cart as $cart_item) {
+		if (!has_term('same-day-delivery', 'product_cat', $cart_item['product_id'])) {
+			return false;
+		}
+	}
+
+	return true;
+}
+
 function flower_shop_child_woo_delivery_effective_current_time($delivery_time_settings = null) {
 	$current_time = flower_shop_child_woo_delivery_current_minutes();
+
+	// If no same-day-delivery item in cart, force next-day only
+	if (!flower_shop_child_cart_has_same_day_item()) {
+		return 1439;
+	}
 
 	// Explicit business rules:
 	// before 8:00 AM -> keep only 11:00 AM - 2:00 PM and later
@@ -544,11 +647,13 @@ function flower_shop_child_enforce_delivery_slots_frontend() {
 	$current_timestamp = current_time('timestamp', true);
 	$server_current_minutes = flower_shop_child_woo_delivery_current_minutes();
 	$server_today_date = wp_date('Y-m-d', $current_timestamp);
+	$has_same_day_item = flower_shop_child_cart_has_same_day_item();
 	?>
 	<script>
 		(function($) {
 			var serverCurrentMinutes = <?php echo (int) $server_current_minutes; ?>;
 			var serverTodayDate = '<?php echo esc_js($server_today_date); ?>';
+			var hasSameDayItem = <?php echo $has_same_day_item ? 'true' : 'false'; ?>;
 			var enforceTimer = null;
 			var isProgrammaticUpdate = false;
 			var observerDebounce = null;
@@ -680,6 +785,11 @@ function flower_shop_child_enforce_delivery_slots_frontend() {
 			}
 
 			function mustDisableTodaySlot(startMinutes, currentMinutes) {
+				// No same-day-delivery item in cart — all today's slots disabled
+				if (!hasSameDayItem) {
+					return true;
+				}
+
 				if (currentMinutes < 480) {
 					return startMinutes < 660;
 				}
@@ -724,7 +834,7 @@ function flower_shop_child_enforce_delivery_slots_frontend() {
 					selectedDate = fp.formatDate(fp.selectedDates[0], 'Y-m-d');
 				}
 
-				if (todayDate && currentMinutes >= 720) {
+				if (!hasSameDayItem || (todayDate && currentMinutes >= 720)) {
 					if (fp) {
 						var enableConfig = Array.isArray(fp.config.enable) ? fp.config.enable.slice() : [];
 						var disableConfig = Array.isArray(fp.config.disable) ? fp.config.disable.slice() : [];
@@ -759,7 +869,7 @@ function flower_shop_child_enforce_delivery_slots_frontend() {
 						}
 						return;
 					}
-				} else if (todayDate && currentMinutes < 720) {
+				} else if (hasSameDayItem && todayDate && currentMinutes < 720) {
 					if (fp) {
 						var preNoonEnableConfig = Array.isArray(fp.config.enable) ? fp.config.enable.slice() : [];
 						var preNoonDisableConfig = Array.isArray(fp.config.disable) ? fp.config.disable.slice() : [];
@@ -913,5 +1023,132 @@ function flower_shop_child_enforce_delivery_slots_frontend() {
 }
 
 add_action('wp_footer', 'flower_shop_child_enforce_delivery_slots_frontend', 99);
+
+function flower_shop_child_delivery_heading_note() {
+	if (!function_exists('is_checkout') || !is_checkout()) {
+		return;
+	}
+	?>
+	<script>
+	(function () {
+		function insertDeliveryNote() {
+			var headings = document.querySelectorAll('.wc-block-components-checkout-step__heading');
+			for (var i = 0; i < headings.length; i++) {
+				var h = headings[i];
+				if (h.querySelector('.wc-block-components-checkout-step__title') &&
+					h.querySelector('.wc-block-components-checkout-step__title').textContent.trim().toLowerCase().indexOf('delivery') !== -1) {
+					if (!h.querySelector('.flower-shop-delivery-note')) {
+						var note = document.createElement('p');
+						note.className = 'flower-shop-delivery-note';
+						note.textContent = 'Order before 12 noon to get Same-Day delivery on selected items.';
+						note.style.cssText = 'margin:4px 0 0;font-size:0.85em;color:#000;font-style:italic;';
+						h.appendChild(note);
+					}
+					break;
+				}
+			}
+		}
+
+		document.addEventListener('DOMContentLoaded', insertDeliveryNote);
+		if (window.MutationObserver) {
+			new MutationObserver(insertDeliveryNote).observe(document.body, { childList: true, subtree: true });
+		}
+	}());
+	</script>
+	<?php
+}
+
+add_action('wp_footer', 'flower_shop_child_delivery_heading_note', 99);
+
+function flower_shop_child_special_message_word_counter() {
+	if (!function_exists('is_checkout') || !is_checkout()) {
+		return;
+	}
+	?>
+	<script>
+	(function () {
+		var MAX_WORDS = 15;
+		var SELECTOR = '#order-flower-shop-child-special-message, [name="order_flower-shop-child/special-message"], #special_message, [name="special_message"]';
+
+		function countWords(str) {
+			return str.trim() === '' ? 0 : str.trim().split(/\s+/).length;
+		}
+
+		function trimToMaxWords(str, max) {
+			var words = str.trim().split(/\s+/);
+			if (words.length <= max) return str;
+			// Preserve a trailing space if the user is mid-word so cursor feels natural
+			return words.slice(0, max).join(' ');
+		}
+
+		function convertToTextarea(input) {
+			if (input.tagName.toLowerCase() === 'textarea') return input;
+
+			var ta = document.createElement('textarea');
+			// Copy relevant attributes
+			ta.id    = input.id;
+			ta.name  = input.name;
+			ta.placeholder = input.placeholder || '';
+			ta.required    = input.required;
+			ta.rows  = 3;
+			ta.style.cssText = 'width:100%;box-sizing:border-box;resize:vertical;';
+			// Copy any class names
+			ta.className = input.className;
+			// Copy current value
+			ta.value = input.value;
+
+			// Replace in DOM; hide the original input (React may still need it)
+			input.style.display = 'none';
+			input.parentNode.insertBefore(ta, input.nextSibling);
+
+			// Keep original input in sync so WooCommerce block picks up the value
+			ta.addEventListener('input', function () {
+				input.value = ta.value;
+				input.dispatchEvent(new Event('input', { bubbles: true }));
+				input.dispatchEvent(new Event('change', { bubbles: true }));
+			});
+
+			return ta;
+		}
+
+		function attachLimiter() {
+			var original = document.querySelector(SELECTOR);
+			if (!original || original.dataset.wordLimiterAttached) return;
+			original.dataset.wordLimiterAttached = '1';
+
+			var field = convertToTextarea(original);
+
+			field.addEventListener('input', function () {
+				if (countWords(field.value) > MAX_WORDS) {
+					field.value = trimToMaxWords(field.value, MAX_WORDS);
+					// Sync back
+					original.value = field.value;
+					original.dispatchEvent(new Event('input', { bubbles: true }));
+					original.dispatchEvent(new Event('change', { bubbles: true }));
+				}
+			});
+
+			// Also block paste that would exceed limit
+			field.addEventListener('paste', function (e) {
+				e.preventDefault();
+				var pasted = (e.clipboardData || window.clipboardData).getData('text');
+				var combined = field.value + pasted;
+				field.value = trimToMaxWords(combined, MAX_WORDS);
+				original.value = field.value;
+				original.dispatchEvent(new Event('input', { bubbles: true }));
+				original.dispatchEvent(new Event('change', { bubbles: true }));
+			});
+		}
+
+		document.addEventListener('DOMContentLoaded', attachLimiter);
+		if (window.MutationObserver) {
+			new MutationObserver(attachLimiter).observe(document.body, { childList: true, subtree: true });
+		}
+	}());
+	</script>
+	<?php
+}
+
+add_action('wp_footer', 'flower_shop_child_special_message_word_counter', 99);
 
 // End of Woo Delivery customizations

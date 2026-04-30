@@ -24,6 +24,18 @@ Tags: one-column, two-columns, three-columns, four-columns, left-sidebar, right-
     padding-right: 42px !important;
 }
 
+.woocommerce form .form-row select.flower-shop-generated-barangay-select,
+.wc-block-components-address-form select.flower-shop-generated-barangay-select:not(.wc-blocks-components-select__select),
+.wc-block-components-checkout-step__content select.flower-shop-generated-barangay-select:not(.wc-blocks-components-select__select) {
+    -webkit-appearance: none;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 20 20' fill='none'%3E%3Cpath d='M5 7.5L10 12.5L15 7.5' stroke='%23666' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+    background-size: 18px 18px;
+    padding-right: 42px !important;
+}
+
 .wc-block-components-text-input.wc-block-components-address-form__city {
     margin-top: 0;
 }
@@ -39,8 +51,55 @@ input[type="text"], input[type="email"], input[type="tel"] {
     height: 60px !important;
 }
 
+input, select, textarea {
+    color: #000 !important;
+    font-weight: 400 !important;
+}
+
+textarea {
+    padding-top: 30px !important;
+    line-height: 20px !important;
+}
+
+.wc-block-components-form .wc-block-components-text-input label, .wc-block-components-text-input label {
+    color: #000 !important;
+    top: 6px !important;
+    transform: scale(.82) !important;
+}
+
 .wc-block-components-address-form__country.wc-block-components-country-input {
     margin-top: 12px !important;
+}
+
+/* Reorder address fields: Country → State → City → Name → Address */
+.wc-block-components-address-form {
+    /* display: grid !important; */
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: 1em;
+}
+
+.wc-block-components-address-form__first_name  { order: 1;  grid-column: 1; }
+.wc-block-components-address-form__last_name   { order: 2;  grid-column: 2; }
+.wc-block-components-address-form__company     { order: 3;  grid-column: 1 / -1; }
+.wc-block-components-address-form__country     { order: 10; grid-column: 1 !important; }
+.wc-block-components-address-form__state       { order: 11; grid-column: 2 !important; }
+.wc-block-components-address-form__city        { order: 12; grid-column: 1 !important; }
+.wc-block-components-address-form__address_1   { order: 13; grid-column: 2 !important; margin-top: 0 !important; }
+.wc-block-components-address-form__address_2   { order: 40; grid-column: 1 / -1; }
+.wc-block-components-address-form__postcode    { order: 50; grid-column: 1; }
+.wc-block-components-address-form__phone       { order: 51; grid-column: 2; }
+
+.wc-block-components-address-form__address_1.flower-shop-has-generated-barangay > input,
+.wc-block-components-address-form__address_1.flower-shop-has-generated-barangay > label {
+    display: none !important;
+}
+
+/* Always show address_2 field and hide its toggle button */
+button.wc-block-components-address-form__address_2-toggle {
+    display: none !important;
+}
+.wc-block-components-address-form .wc-block-components-address-form__address_2 {
+    display: block !important;
 }
 
 .prad-block-content.prad-ellipsis-2, 
