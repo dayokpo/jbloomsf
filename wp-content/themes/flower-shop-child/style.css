@@ -117,6 +117,11 @@ a.prad-absolute.prad-fron-edit-addon{
     display: none !important;
 }
 
+.flower-shop-category-featured-image {
+    max-width: 1200px;
+    margin: auto;
+}
+
 @media only screen and (min-width: 1024px) {
     .single-product .cmsmasters_single_product {
         display: flex;

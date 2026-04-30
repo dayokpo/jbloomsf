@@ -1193,6 +1193,41 @@ function flower_shop_child_show_product_category_featured_image() {
 	echo '</div>';
 }
 
-add_action('woocommerce_archive_description', 'flower_shop_child_show_product_category_featured_image', 5);
+add_action('woocommerce_before_main_content', 'flower_shop_child_show_product_category_featured_image', 25);
+
+function flower_shop_child_relocate_category_featured_image() {
+	if (!function_exists('is_product_category') || !is_product_category()) {
+		return;
+	}
+	?>
+	<script>
+	(function () {
+		function relocate() {
+			var img = document.querySelector('.flower-shop-category-featured-image');
+			if (!img) return;
+
+			// Target: before the content_wrap div that holds content + sidebar
+			var wrap = document.querySelector('.content_wrap') || document.querySelector('.middle_inner') || document.querySelector('#middle');
+			if (!wrap) return;
+
+			// Already in the right place
+			if (img.parentNode === wrap.parentNode && img.nextSibling === wrap) return;
+
+			img.parentNode.removeChild(img);
+			img.style.cssText = 'display:block;width:100%;margin:0 0 24px;';
+			wrap.parentNode.insertBefore(img, wrap);
+		}
+
+		if (document.readyState === 'loading') {
+			document.addEventListener('DOMContentLoaded', relocate);
+		} else {
+			relocate();
+		}
+	}());
+	</script>
+	<?php
+}
+
+add_action('wp_footer', 'flower_shop_child_relocate_category_featured_image', 5);
 
 // End of Woo Delivery customizations
