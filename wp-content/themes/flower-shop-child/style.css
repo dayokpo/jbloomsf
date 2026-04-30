@@ -113,7 +113,9 @@ a.prad-absolute.prad-fron-edit-addon{
     border-right: none !important;
 }
 
-
+.footer_logo_wrap, .footer_custom_html_wrap {
+    display: none !important;
+}
 
 @media only screen and (min-width: 1024px) {
     .single-product .cmsmasters_single_product {
