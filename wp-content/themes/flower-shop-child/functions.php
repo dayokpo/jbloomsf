@@ -240,15 +240,32 @@ function flower_shop_child_validate_special_message($data, $errors) {
 add_action('woocommerce_after_checkout_validation', 'flower_shop_child_validate_special_message', 10, 2);
 
 function flower_shop_child_save_special_message($order, $data) {
+	$special_message = '';
+
 	if (!empty($data['special_message'])) {
-		$order->update_meta_data('_special_message', sanitize_textarea_field($data['special_message']));
+		$special_message = $data['special_message'];
+	} elseif (isset($_POST['special_message']) && '' !== $_POST['special_message']) {
+		$special_message = wc_clean(wp_unslash($_POST['special_message']));
+	} elseif (isset($_POST['order_flower-shop-child/special-message']) && '' !== $_POST['order_flower-shop-child/special-message']) {
+		$special_message = wc_clean(wp_unslash($_POST['order_flower-shop-child/special-message']));
 	}
+
+	if ('' === $special_message) {
+		return;
+	}
+
+	$special_message = sanitize_textarea_field($special_message);
+	$order->update_meta_data('_special_message', $special_message);
+	$order->update_meta_data('flower-shop-child/special-message', $special_message);
 }
 
 function flower_shop_child_get_special_message($order) {
 	$message = $order->get_meta('flower-shop-child/special-message');
 	if (empty($message)) {
 		$message = $order->get_meta('_special_message');
+	}
+	if (empty($message)) {
+		$message = $order->get_meta('order_flower-shop-child/special-message');
 	}
 	return $message;
 }
