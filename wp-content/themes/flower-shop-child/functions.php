@@ -1168,4 +1168,31 @@ function flower_shop_child_special_message_word_counter() {
 
 add_action('wp_footer', 'flower_shop_child_special_message_word_counter', 99);
 
+function flower_shop_child_show_product_category_featured_image() {
+	if (!function_exists('is_product_category') || !is_product_category()) {
+		return;
+	}
+
+	$term = get_queried_object();
+
+	if (!$term || empty($term->term_id)) {
+		return;
+	}
+
+	$thumbnail_id = (int) get_term_meta($term->term_id, 'thumbnail_id', true);
+
+	if (!$thumbnail_id) {
+		return;
+	}
+
+	echo '<div class="flower-shop-category-featured-image" style="margin:0 0 20px;">';
+	echo wp_get_attachment_image($thumbnail_id, 'full', false, array(
+		'class' => 'flower-shop-category-featured-image__img',
+		'alt'   => esc_attr($term->name),
+	));
+	echo '</div>';
+}
+
+add_action('woocommerce_archive_description', 'flower_shop_child_show_product_category_featured_image', 5);
+
 // End of Woo Delivery customizations
