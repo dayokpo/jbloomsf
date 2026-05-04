@@ -132,7 +132,7 @@ a.prad-absolute.prad-fron-edit-addon{
 }
 
 .prad-addons-wrapper::before {
-    content: "ADD- ONS ( Best paired with)";
+    content: "ADD-ONS ( Best paired with)";
     display: block;
     font-size: 20px;
     font-weight: bold;
