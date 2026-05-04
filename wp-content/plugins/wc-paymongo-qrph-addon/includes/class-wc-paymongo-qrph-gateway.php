@@ -654,7 +654,7 @@ class WC_PayMongo_QRPH_Gateway extends WC_Payment_Gateway
                     <?php endif; ?>
                     <div class="actions">
                         <a class="primary" href="<?php echo esc_url(add_query_arg(array('wc-api' => 'wcpm_qrph_return', 'order' => $order_id, 'intent' => $intent_id), home_url('/'))); ?>"><?php echo esc_html__('I have completed payment', 'wc-paymongo-qrph-addon'); ?></a>
-                        <a class="secondary" href="<?php echo esc_url($order->get_checkout_payment_url()); ?>"><?php echo esc_html__('Back to checkout', 'wc-paymongo-qrph-addon'); ?></a>
+                        <a class="secondary" href="<?php echo esc_url(wc_get_checkout_url()); ?>"><?php echo esc_html__('Back to checkout', 'wc-paymongo-qrph-addon'); ?></a>
                     </div>
                 </div>
             </body>
