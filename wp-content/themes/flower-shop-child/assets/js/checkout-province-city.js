@@ -15,6 +15,76 @@
     var latestSelectedCities = {};
     var latestSelectedPostcodes = {};
     var latestSelectedBarangays = {};
+    var checkoutFetchSyncInstalled = false;
+
+    function getAddressFieldValue(prefix, field) {
+        var $generatedSelect = $('select.flower-shop-generated-' + field + '-select[data-prefix="' + prefix + '"]').first();
+
+        if ($generatedSelect.length) {
+            return String($generatedSelect.val() || '').trim();
+        }
+
+        var $field = findField(prefix, field === 'barangay' ? 'barangay' : field);
+        return $field.length ? String($field.val() || '').trim() : '';
+    }
+
+    function ensureCheckoutAddressPayload(addressData, prefix, fallbackPrefix) {
+        var next = addressData || {};
+        var city = getAddressFieldValue(prefix, 'city');
+        var barangay = getAddressFieldValue(prefix, 'barangay');
+
+        if (!city && fallbackPrefix) {
+            city = getAddressFieldValue(fallbackPrefix, 'city');
+        }
+
+        if (!barangay && fallbackPrefix) {
+            barangay = getAddressFieldValue(fallbackPrefix, 'barangay');
+        }
+
+        if (city) {
+            next.city = city;
+        }
+
+        if (barangay) {
+            next.address_1 = barangay;
+        }
+
+        return next;
+    }
+
+    function installCheckoutPayloadSync() {
+        if (!window.fetch || checkoutFetchSyncInstalled) {
+            return;
+        }
+
+        checkoutFetchSyncInstalled = true;
+        var originalFetch = window.fetch.bind(window);
+
+        window.fetch = function (input, init) {
+            var url = typeof input === 'string' ? input : ((input && input.url) || '');
+            var isCheckoutRequest = url.indexOf('/wp-json/wc/store/v1/checkout') !== -1;
+            var requestInit = init;
+
+            if (isCheckoutRequest && requestInit && typeof requestInit.body === 'string') {
+                try {
+                    var parsed = JSON.parse(requestInit.body);
+
+                    if (parsed && typeof parsed === 'object') {
+                        parsed.billing_address = ensureCheckoutAddressPayload(parsed.billing_address, 'billing');
+                        parsed.shipping_address = ensureCheckoutAddressPayload(parsed.shipping_address, 'shipping', 'billing');
+
+                        requestInit = Object.assign({}, requestInit, {
+                            body: JSON.stringify(parsed)
+                        });
+                    }
+                } catch (e) {
+                    requestInit = init;
+                }
+            }
+
+            return originalFetch(input, requestInit);
+        };
+    }
 
     function normalize(value) {
         return String(value || '')
@@ -635,6 +705,7 @@
     }
 
     $(function () {
+        installCheckoutPayloadSync();
         bindEvents();
         loadCityData();
         loadBarangayData();
