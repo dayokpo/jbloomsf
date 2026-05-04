@@ -162,6 +162,27 @@ function flower_shop_child_customize_checkout_location_fields($fields) {
 
 add_filter('woocommerce_checkout_fields', 'flower_shop_child_customize_checkout_location_fields');
 
+function flower_shop_child_force_required_checkout_phone_visibility($value) {
+	return 'required';
+}
+
+function flower_shop_child_force_required_checkout_phone_fields($fields) {
+	foreach (array('billing_phone', 'shipping_phone') as $key) {
+		if (isset($fields['billing'][$key])) {
+			$fields['billing'][$key]['required'] = true;
+		}
+
+		if (isset($fields['shipping'][$key])) {
+			$fields['shipping'][$key]['required'] = true;
+		}
+	}
+
+	return $fields;
+}
+
+add_filter('pre_option_woocommerce_checkout_phone_field', 'flower_shop_child_force_required_checkout_phone_visibility');
+add_filter('woocommerce_checkout_fields', 'flower_shop_child_force_required_checkout_phone_fields', 30);
+
 // Block checkout reads field order from country locale data
 function flower_shop_child_reorder_ph_address_locale($locale) {
 	if (!isset($locale['PH'])) {

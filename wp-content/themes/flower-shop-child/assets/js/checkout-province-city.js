@@ -11,6 +11,7 @@
     var cityData = null;
     var barangayData = null;
     var refreshTimer = null;
+    var reorderTimer = null;
     var pendingResetPrefixes = {};
     var latestSelectedCities = {};
     var latestSelectedPostcodes = {};
@@ -84,6 +85,69 @@
 
             return originalFetch(input, requestInit);
         };
+    }
+
+    function findAddressFieldContainer($form, prefix, fieldKey) {
+        var $inputByName = $form.find('[name="' + prefix + '_' + fieldKey + '"]').first();
+        var $container = $inputByName.closest('[class*="wc-block-components-address-form__"]');
+
+        if ($container.length) {
+            return $container;
+        }
+
+        return $form.find('.wc-block-components-address-form__' + fieldKey).first();
+    }
+
+    function reorderBlockAddressFields(prefix) {
+        var $form = $('[name="' + prefix + '_country"]').first().closest('.wc-block-components-address-form');
+
+        if (!$form.length) {
+            $form = $('[name="' + prefix + '_first_name"]').first().closest('.wc-block-components-address-form');
+        }
+
+        if (!$form.length) {
+            return;
+        }
+
+        var orderedKeys = ['first_name', 'last_name', 'country', 'state', 'city', 'address_1', 'address_2'];
+        var nodes = [];
+
+        orderedKeys.forEach(function (fieldKey) {
+            var $container = findAddressFieldContainer($form, prefix, fieldKey);
+
+            if ($container.length && nodes.indexOf($container.get(0)) === -1) {
+                nodes.push($container.get(0));
+            }
+        });
+
+        if (!nodes.length) {
+            return;
+        }
+
+        var $postcodeContainer = findAddressFieldContainer($form, prefix, 'postcode');
+
+        nodes.forEach(function (node) {
+            if ($postcodeContainer.length) {
+                $postcodeContainer.before(node);
+            } else {
+                $form.append(node);
+            }
+        });
+    }
+
+    function reorderBlockAddressLayout() {
+        reorderBlockAddressFields('billing');
+        reorderBlockAddressFields('shipping');
+    }
+
+    function scheduleBlockAddressReorder() {
+        if (reorderTimer) {
+            window.clearTimeout(reorderTimer);
+        }
+
+        reorderTimer = window.setTimeout(function () {
+            reorderBlockAddressLayout();
+        }, 40);
     }
 
     function normalize(value) {
@@ -633,6 +697,7 @@
     function initializeAddressDropdowns() {
         repopulateCitySelect('billing', !!pendingResetPrefixes.billing);
         repopulateCitySelect('shipping', !!pendingResetPrefixes.shipping);
+        scheduleBlockAddressReorder();
         pendingResetPrefixes = {};
     }
 
@@ -658,6 +723,7 @@
 
                 resetAddressSelection(prefix);
                 scheduleRefresh(prefix);
+                scheduleBlockAddressReorder();
                 $(document.body).trigger('update_checkout');
             })
             .on('change', 'select.flower-shop-generated-city-select', function () {
@@ -665,19 +731,11 @@
 
                 latestSelectedBarangays[prefix] = '';
                 repopulateBarangaySelect(prefix, true);
+                scheduleBlockAddressReorder();
             })
             .on('updated_checkout', function () {
-                scheduleRefresh();
+                scheduleBlockAddressReorder();
             });
-
-        if (window.MutationObserver) {
-            new MutationObserver(function () {
-                scheduleRefresh();
-            }).observe(document.body, {
-                childList: true,
-                subtree: true
-            });
-        }
     }
 
     function loadCityData() {
@@ -709,5 +767,6 @@
         bindEvents();
         loadCityData();
         loadBarangayData();
+        scheduleBlockAddressReorder();
     });
 }(jQuery));
