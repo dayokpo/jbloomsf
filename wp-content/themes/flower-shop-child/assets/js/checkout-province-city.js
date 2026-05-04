@@ -71,7 +71,7 @@
                     var parsed = JSON.parse(requestInit.body);
 
                     if (parsed && typeof parsed === 'object') {
-                        parsed.billing_address = ensureCheckoutAddressPayload(parsed.billing_address, 'billing');
+                        parsed.billing_address = ensureCheckoutAddressPayload(parsed.billing_address, 'billing', 'shipping');
                         parsed.shipping_address = ensureCheckoutAddressPayload(parsed.shipping_address, 'shipping', 'billing');
 
                         requestInit = Object.assign({}, requestInit, {
@@ -148,6 +148,31 @@
         reorderTimer = window.setTimeout(function () {
             reorderBlockAddressLayout();
         }, 40);
+    }
+
+    function hasGeneratedSelect(prefix, type) {
+        return $('select.flower-shop-generated-' + type + '-select[data-prefix="' + prefix + '"]').length > 0;
+    }
+
+    function ensureAddressControlsReady() {
+        if (!cityData) {
+            return;
+        }
+
+        ['billing', 'shipping'].forEach(function (prefix) {
+            var $cityField = findField(prefix, 'city');
+            var $barangayField = findField(prefix, 'barangay');
+            var needsCityReinit = $cityField.length && $cityField.is('input[type="text"]') && !hasGeneratedSelect(prefix, 'city');
+            var needsBarangayReinit = $barangayField.length && $barangayField.is('input[type="text"]') && !hasGeneratedSelect(prefix, 'barangay');
+
+            if (needsCityReinit) {
+                repopulateCitySelect(prefix, false);
+            }
+
+            if (needsBarangayReinit) {
+                repopulateBarangaySelect(prefix, false);
+            }
+        });
     }
 
     function normalize(value) {
@@ -733,7 +758,22 @@
                 repopulateBarangaySelect(prefix, true);
                 scheduleBlockAddressReorder();
             })
+            .on('change', '.wc-block-components-checkbox input[type="checkbox"], input[type="checkbox"][name*="billing"][name*="shipping"], input[type="checkbox"][id*="billing"][id*="shipping"]', function () {
+                // Block checkout may remount address fields when toggling "Use same address for billing".
+                // Reinitialize both groups so city/barangay selects are recreated from text inputs.
+                scheduleRefresh('billing');
+                scheduleRefresh('shipping');
+                scheduleBlockAddressReorder();
+            })
+            .on('click', '#shipping-method .wc-block-checkout__shipping-method-option, .wc-block-components-checkbox', function () {
+                // Shipping method and some block checkboxes remount address inputs asynchronously.
+                window.setTimeout(function () {
+                    ensureAddressControlsReady();
+                    scheduleBlockAddressReorder();
+                }, 120);
+            })
             .on('updated_checkout', function () {
+                ensureAddressControlsReady();
                 scheduleBlockAddressReorder();
             });
     }
@@ -767,6 +807,7 @@
         bindEvents();
         loadCityData();
         loadBarangayData();
+        ensureAddressControlsReady();
         scheduleBlockAddressReorder();
     });
 }(jQuery));
