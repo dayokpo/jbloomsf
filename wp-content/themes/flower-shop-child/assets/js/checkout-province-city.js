@@ -300,13 +300,43 @@
         return $select;
     }
 
+    function clearBlocksValidationError(fieldName) {
+        if (!fieldName) {
+            return;
+        }
+
+        if (window.wp && window.wp.data) {
+            try {
+                var store = window.wp.data.dispatch('wc/store/validation');
+
+                if (store && typeof store.clearValidationError === 'function') {
+                    store.clearValidationError(fieldName);
+                }
+            } catch (e) {
+                // validation store not available — silent fail
+            }
+        }
+    }
+
     function syncCityValue($cityInput, value) {
         if (!$cityInput.length) {
             return;
         }
 
-        setFieldValue($cityInput.get(0), value || '');
-        triggerFieldEvents($cityInput.get(0));
+        var el = $cityInput.get(0);
+
+        setFieldValue(el, value || '');
+        triggerFieldEvents(el);
+
+        if (value) {
+            var fieldName = $cityInput.attr('name') || '';
+
+            if (fieldName) {
+                clearBlocksValidationError(fieldName);
+            }
+
+            $cityInput.attr('aria-invalid', 'false');
+        }
     }
 
     function syncPostcodeValue($postcodeInput, value, prefix) {
@@ -329,8 +359,20 @@
             return;
         }
 
-        setFieldValue($barangayInput.get(0), value || '');
-        triggerFieldEvents($barangayInput.get(0));
+        var el = $barangayInput.get(0);
+
+        setFieldValue(el, value || '');
+        triggerFieldEvents(el);
+
+        if (value) {
+            var fieldName = $barangayInput.attr('name') || '';
+
+            if (fieldName) {
+                clearBlocksValidationError(fieldName);
+            }
+
+            $barangayInput.attr('aria-invalid', 'false');
+        }
     }
 
     function resetAddressSelection(prefix) {
